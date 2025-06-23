@@ -15,5 +15,6 @@ huggingface_hub==0.23.0
 sqlalchemy
 asyncpg
 psycopg2-binary
-
 moviepy
+imageio
+imageio-ffmpeg
