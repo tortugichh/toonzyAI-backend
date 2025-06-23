@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from typing import NamedTuple, Optional, List
-from .model_manager import model_manager
+from .model_manager import generate_image
 from pydantic import BaseModel
 from dotenv import load_dotenv
 load_dotenv()
@@ -51,7 +51,7 @@ def generate_avatar_with_agent(prompt: str) -> AvatarGenerationResult:
                 reason=reason,
                 moderation_flags=flags or []
             )
-        image_bytes, image_base64 = model_manager.generate_image(prompt)
+        image_bytes, image_base64 = generate_image(prompt)
         return AvatarGenerationResult(
             image_bytes=image_bytes,
             image_base64=image_base64,
