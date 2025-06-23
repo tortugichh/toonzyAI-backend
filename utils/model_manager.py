@@ -46,12 +46,12 @@ def get_pipeline() -> StableDiffusionXLPipeline:
             MODEL_ID,
             torch_dtype=torch_dtype
         )
-        # torch.compile (PyTorch 2.0+)
-        try:
-            pipe.unet = torch.compile(pipe.unet)
-            logger.info("UNet compiled with torch.compile")
-        except Exception as e:
-            logger.warning(f"torch.compile not available or failed: {e}")
+        # torch.compile (PyTorch 2.0+) — не используем на CPU, вызывает ошибки
+        # try:
+        #     pipe.unet = torch.compile(pipe.unet)
+        #     logger.info("UNet compiled with torch.compile")
+        # except Exception as e:
+        #     logger.warning(f"torch.compile not available or failed: {e}")
         _pipeline = pipe
         _initialized = True
         logger.info(f"SDXL 1.0 pipeline initialized successfully on {device}")
