@@ -3,8 +3,8 @@ uvicorn[standard]
 pydantic
 python-dotenv
 
-diffusers
-torch
+diffusers==0.25.0
+torch==2.2.2
 transformers
 accelerate
 safetensors
