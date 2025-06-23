@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
-from schemas.avatar_schemas import AvatarCreate, AvatarResponse
+from schemas.avatar_schemas import AvatarCreate, AvatarResponse, AvatarCreateRequest
 from uuid import UUID
 import base64
 import logging
@@ -8,60 +8,16 @@ from typing import Optional
 from fastapi.responses import StreamingResponse
 import io
 from db.avatar_repository import insert_avatar, get_avatar_by_id, update_avatar_status
+from utils.avatar_agent import generate_avatar
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.post("/", response_model=AvatarResponse)
-async def create_avatar(data: AvatarCreate):
-    """Create a new avatar"""
-    try:
-        # Импортируем здесь, чтобы избежать ошибок при запуске
-        from utils.avatar_agent import generate_avatar_with_agent
-        
-        logger.info(f"Creating avatar for user {data.user_id} with prompt: {data.prompt}")
-        
-        agent_result = generate_avatar_with_agent(data.prompt)
-        if agent_result.is_blocked:
-            logger.warning(f"Avatar creation blocked: {agent_result.reason}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=agent_result.reason
-            )
-        
-        avatar_id = insert_avatar(
-            user_id=data.user_id,
-            prompt=data.prompt,
-            image_data=agent_result.image_bytes,
-            status="completed",
-            moderation_flags=agent_result.moderation_flags
-        )
-        
-        logger.info(f"Avatar created successfully with ID: {avatar_id}")
-        
-        return AvatarResponse(
-            id=avatar_id,
-            user_id=data.user_id,
-            prompt=data.prompt,
-            image_data=agent_result.image_base64,
-            created_at=agent_result.created_at,
-            status="completed",
-            moderation_flags=agent_result.moderation_flags
-        )
-    except ImportError as e:
-        logger.error(f"Import error in create_avatar: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Avatar generation service unavailable"
-        )
-    except Exception as e:
-        logger.error(f"Error creating avatar: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create avatar"
-        )
+@router.post("/avatars/", response_model=AvatarResponse)
+async def create_avatar(request: AvatarCreateRequest) -> AvatarResponse:
+    return await generate_avatar(request)
 
 @router.get("/{avatar_id}", response_model=AvatarResponse)
 async def get_avatar(avatar_id: UUID):

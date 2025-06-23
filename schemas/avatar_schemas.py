@@ -14,4 +14,11 @@ class AvatarResponse(BaseModel):
     image_data: str  # base64 string
     created_at: datetime
     status: str
-    moderation_flags: Optional[List[str]] = None 
+    moderation_flags: Optional[List[str]] = None
+
+class AvatarCreateRequest(BaseModel):
+    prompt: str
+
+class AvatarResponse(BaseModel):
+    avatar_id: str
+    image_url: str 

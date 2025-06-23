@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 from fastapi.responses import JSONResponse
 from utils.model_manager import warmup_pipeline
 import threading
+from routers.avatar_routes import router as avatar_router
+from routers.storyboard_routes import router as storyboard_router
+from fastapi.staticfiles import StaticFiles
 
 # Настройка логирования
 logging.basicConfig(
@@ -32,6 +35,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Базовые маршруты для тестирования
 @app.get("/")
@@ -72,9 +77,12 @@ async def shutdown_event():
 
 # Импортируем роутеры - убираем try-catch для отладки
 logger.info("Loading avatar routes...")
-from routers.avatar_routes import router as avatar_router
 app.include_router(avatar_router, prefix="/avatars", tags=["avatars"])
 logger.info("Avatar routes loaded successfully")
+
+logger.info("Loading storyboard routes...")
+app.include_router(storyboard_router, prefix="/storyboards", tags=["storyboards"])
+logger.info("Storyboard routes loaded successfully")
 
 # Обработчик ошибок
 @app.exception_handler(Exception)

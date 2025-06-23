@@ -4,7 +4,13 @@ from typing import NamedTuple, Optional, List
 from .model_manager import generate_image
 from pydantic import BaseModel
 from dotenv import load_dotenv
-load_dotenv()
+from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
+import uuid
+import logging
+
+AVATAR_DIR = "static/avatars"
+os.makedirs(AVATAR_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
@@ -69,3 +75,17 @@ def generate_avatar_with_agent(prompt: str) -> AvatarGenerationResult:
             reason=f"Failed to generate avatar: {str(e)}",
             moderation_flags=["generation_error"]
         )
+
+async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
+    avatar_id = str(uuid.uuid4())
+    try:
+        image_bytes, _ = generate_image(request.prompt)
+        image_path = os.path.join(AVATAR_DIR, f"{avatar_id}.png")
+        with open(image_path, "wb") as f:
+            f.write(image_bytes)
+        image_url = f"/static/avatars/{avatar_id}.png"
+        logger.info(f"Avatar generated and saved: {image_url}")
+        return AvatarResponse(avatar_id=avatar_id, image_url=image_url)
+    except Exception as e:
+        logger.error(f"Failed to generate avatar: {e}")
+        raise
