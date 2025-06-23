@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Функциональный стиль: кэшируем pipeline, warmup, torch.compile.
 
+
 _pipeline: Optional[StableDiffusionXLPipeline] = None
 _initialized: bool = False
 
