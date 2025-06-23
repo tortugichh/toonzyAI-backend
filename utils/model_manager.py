@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 
+
 _pipeline: Optional[StableDiffusionXLPipeline] = None
 _initialized: bool = False
 
