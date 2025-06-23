@@ -46,7 +46,6 @@ def get_pipeline() -> StableDiffusionXLPipeline:
             MODEL_ID,
             torch_dtype=torch_dtype
         )
-        pipe = pipe.to(device)
         # torch.compile (PyTorch 2.0+)
         try:
             pipe.unet = torch.compile(pipe.unet)
