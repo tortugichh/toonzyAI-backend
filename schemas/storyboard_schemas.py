@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class StoryboardCreateRequest(BaseModel):
     avatar_id: str
@@ -11,4 +11,5 @@ class StoryboardFrame(BaseModel):
     image_url: str
 
 class StoryboardResponse(BaseModel):
-    frames: List[StoryboardFrame] 
+    frames: List[StoryboardFrame]
+    mp4_url: Optional[str] = None 
