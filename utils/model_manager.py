@@ -12,6 +12,7 @@ from huggingface_hub import login
 
 login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 
+
 MODEL_CACHE_DIR = Path("models")
 MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
 
