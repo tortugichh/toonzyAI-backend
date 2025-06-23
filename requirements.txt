@@ -9,7 +9,7 @@ transformers
 accelerate
 safetensors
 Pillow
-numpy
+numpy<2
 
 huggingface_hub==0.23.0
 sqlalchemy
