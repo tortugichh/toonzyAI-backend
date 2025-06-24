@@ -9,6 +9,7 @@ import base64
 from typing import Optional, Tuple
 import logging
 from huggingface_hub import login
+import requests
 
 login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 
@@ -74,23 +75,28 @@ def warmup_pipeline() -> None:
 
 
 def generate_image(prompt: str) -> Tuple[bytes, str]:
+    api_key = os.getenv("STABILITY_API_KEY")
+    url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "image/png",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "prompt": prompt,
+        "output_format": "png"
+    }
     try:
-        pipe = get_pipeline()
-        device = "cpu"
-        generator = torch.Generator(device).manual_seed(0)
-        image = pipe(
-            prompt,
-            height=1024,
-            width=1024,
-            guidance_scale=5.0,
-            num_inference_steps=50,
-            generator=generator
-        ).images[0]
-        image_bytes = _image_to_bytes(image)
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        return image_bytes, image_base64
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            image_bytes = response.content
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            return image_bytes, image_base64
+        else:
+            logging.error(f"Stability API error: {response.status_code} {response.text}")
+            return _create_placeholder_image()
     except Exception as e:
-        logger.error(f"Image generation failed: {e}")
+        logging.error(f"Image generation failed: {e}")
         return _create_placeholder_image()
 
 
@@ -102,6 +108,8 @@ def _image_to_bytes(image: Image.Image) -> bytes:
 
 def _create_placeholder_image() -> Tuple[bytes, str]:
     img = Image.new('RGB', (512, 512), color='lightgray')
-    img_bytes = _image_to_bytes(img)
+    img_byte_array = io.BytesIO()
+    img.save(img_byte_array, format='PNG')
+    img_bytes = img_byte_array.getvalue()
     img_base64 = base64.b64encode(img_bytes).decode('utf-8')
     return img_bytes, img_base64

@@ -1,18 +1,13 @@
 import os
 from datetime import datetime
 from typing import NamedTuple, Optional, List
-from .model_manager import generate_image
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import uuid
 import logging
+from utils.model_manager import generate_image
 
-AVATAR_DIR = "static/avatars"
-os.makedirs(AVATAR_DIR, exist_ok=True)
 logger = logging.getLogger(__name__)
-
-HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
 class AgentResult(BaseModel):
     is_blocked: bool
@@ -23,7 +18,6 @@ class AgentResult(BaseModel):
     moderation_flags: Optional[List[str]] = None
 
 class AvatarGenerationResult(NamedTuple):
-    """Result of avatar generation process."""
     image_bytes: bytes
     image_base64: str
     created_at: datetime
@@ -32,17 +26,13 @@ class AvatarGenerationResult(NamedTuple):
     moderation_flags: List[str] = []
 
 def moderate_prompt(prompt: str) -> tuple[bool, Optional[str], Optional[List[str]]]:
-    """Moderate the input prompt for inappropriate content."""
     blocked_words = ["hate", "violence", "nsfw", "explicit"]
-    
     if not prompt or len(prompt.strip()) < 3:
         return True, "Prompt too short", ["too_short"]
-    
     prompt_lower = prompt.lower()
     for word in blocked_words:
         if word in prompt_lower:
             return True, f"Prompt contains inappropriate content", ["blocked_content"]
-    
     return False, None, None
 
 def generate_avatar_with_agent(prompt: str) -> AvatarGenerationResult:
@@ -80,7 +70,8 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
     avatar_id = str(uuid.uuid4())
     try:
         image_bytes, _ = generate_image(request.prompt)
-        image_path = os.path.join(AVATAR_DIR, f"{avatar_id}.png")
+        image_path = f"static/avatars/{avatar_id}.png"
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
         with open(image_path, "wb") as f:
             f.write(image_bytes)
         image_url = f"/static/avatars/{avatar_id}.png"

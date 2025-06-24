@@ -1,16 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
-from schemas.avatar_schemas import AvatarCreate, AvatarResponse, AvatarCreateRequest
-from uuid import UUID
-import base64
+from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import logging
-from datetime import datetime
-from typing import Optional
-from fastapi.responses import StreamingResponse
-import io
-from db.avatar_repository import insert_avatar, get_avatar_by_id, update_avatar_status
 from utils.avatar_agent import generate_avatar
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -18,6 +10,11 @@ router = APIRouter()
 @router.post("/avatars/", response_model=AvatarResponse)
 async def create_avatar(request: AvatarCreateRequest) -> AvatarResponse:
     return await generate_avatar(request)
+
+# Health check endpoint
+@router.get("/avatars/health")
+async def avatar_health():
+    return {"status": "ok", "service": "avatar"}
 
 @router.get("/{avatar_id}", response_model=AvatarResponse)
 async def get_avatar(avatar_id: UUID):
@@ -115,12 +112,6 @@ async def regenerate_avatar(avatar_id: UUID):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to regenerate avatar"
         )
-
-# Добавляем простой эндпойнт для проверки работоспособности
-@router.get("/health")
-async def avatar_health():
-    """Health check for avatar service"""
-    return {"status": "ok", "service": "avatar"}
 
 @router.get("/{avatar_id}/image")
 def get_avatar_image(avatar_id: UUID):
