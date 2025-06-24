@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from utils.model_manager import warmup_pipeline
 import threading
 from routers.avatar_routes import router as avatar_router
-from routers.storyboard_routes import router as storyboard_router
 from fastapi.staticfiles import StaticFiles
 
 # Настройка логирования
