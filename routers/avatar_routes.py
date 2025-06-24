@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Response
 from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import logging
 from utils.avatar_agent import generate_avatar
 import os
-from fastapi.responses import RedirectResponse
+from google.cloud import storage
 from utils.model_manager import test_vertex_ai_connection
 
 logger = logging.getLogger(__name__)
@@ -26,9 +26,14 @@ async def vertex_ai_test():
 
 @router.get("/avatars/{avatar_id}/file")
 def get_avatar_file(avatar_id: str):
-    """Редиректит на публичный URL изображения в GCS."""
+    """Возвращает изображение из GCS по ID."""
     bucket_name = os.getenv("GCS_BUCKET")
     if not bucket_name:
         raise HTTPException(status_code=500, detail="GCS_BUCKET not configured")
-    public_url = f"https://storage.googleapis.com/{bucket_name}/avatars/{avatar_id}.png"
-    return RedirectResponse(public_url)
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(f"avatars/{avatar_id}.png")
+    if not blob.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    image_bytes = blob.download_as_bytes()
+    return Response(content=image_bytes, media_type="image/png")
