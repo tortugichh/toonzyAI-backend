@@ -31,6 +31,7 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p models logs
 
+
 # Expose port
 EXPOSE 8000
 

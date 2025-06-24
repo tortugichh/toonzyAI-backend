@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+
 app = FastAPI(
     title="ToonzyAI Avatar Generation API",
     description="API for generating AI avatars",
@@ -80,7 +81,6 @@ app.include_router(avatar_router, prefix="/avatars", tags=["avatars"])
 logger.info("Avatar routes loaded successfully")
 
 logger.info("Loading storyboard routes...")
-app.include_router(storyboard_router, prefix="/storyboards", tags=["storyboards"])
 logger.info("Storyboard routes loaded successfully")
 
 # Обработчик ошибок
