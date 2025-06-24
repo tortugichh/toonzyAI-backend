@@ -21,4 +21,5 @@ imageio
 imageio-ffmpeg
 
 google-cloud-aiplatform
+google-cloud-storage
  

@@ -6,6 +6,7 @@ from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import uuid
 import logging
 from utils.model_manager import generate_image
+from utils.gcs_client import upload_image_to_gcs
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +72,9 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
     avatar_id = str(uuid.uuid4())
     try:
         image_bytes, _ = generate_image(request.prompt)
-        image_path = f"static/avatars/{avatar_id}.png"
-        os.makedirs(os.path.dirname(image_path), exist_ok=True)
-        with open(image_path, "wb") as f:
-            f.write(image_bytes)
-        image_url = f"/static/avatars/{avatar_id}.png"
-        logger.info(f"Avatar generated and saved: {image_url}")
+        # Загружаем изображение в GCS
+        image_url = upload_image_to_gcs(image_bytes, f"avatars/{avatar_id}.png")
+        logger.info(f"Avatar generated and uploaded: {image_url}")
         return AvatarResponse(avatar_id=avatar_id, image_url=image_url)
     except Exception as e:
         logger.error(f"Failed to generate avatar: {e}")
