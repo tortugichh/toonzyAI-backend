@@ -79,15 +79,14 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
     url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Accept": "image/png",
-        "Content-Type": "application/json"
+        "Accept": "image/png"
     }
-    payload = {
+    data = {
         "prompt": prompt,
         "output_format": "png"
     }
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, data=data)
         if response.status_code == 200:
             image_bytes = response.content
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
