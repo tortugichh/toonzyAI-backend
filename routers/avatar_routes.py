@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import logging
 from utils.avatar_agent import generate_avatar
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
