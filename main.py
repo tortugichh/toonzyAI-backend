@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Загружаем переменные окружения
 load_dotenv()
 
-# Создаем приложение
+
 app = FastAPI(
     title="ToonzyAI Avatar Generation API",
     description="API for generating AI avatars",
