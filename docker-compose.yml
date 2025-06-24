@@ -17,6 +17,8 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key/key.json
       - VERTEX_PROJECT=extended-bongo-463404-r3
       - VERTEX_LOCATION=us-central1
+      - GCS_PROJECT=extended-bongo-463404-r3
+      - GCS_BUCKET=toonzyai-avatars
 
 volumes:
   postgres_data:
