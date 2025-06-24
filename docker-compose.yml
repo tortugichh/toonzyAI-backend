@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   backend:
     build: .
@@ -9,6 +11,13 @@ services:
     restart: unless-stopped
     volumes:
       - ./static:/app/static
+      - .:/app
+      - ./service-account-key:/app/service-account-key
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key/key.json
+      - VERTEX_PROJECT=extended-bongo-463404-r3
+      - VERTEX_LOCATION=us-central1
 
 volumes:
   postgres_data:
+ 

@@ -2,20 +2,15 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 from pathlib import Path
 import torch
-from diffusers import StableDiffusionXLPipeline
 from PIL import Image
 import io
 import base64
 from typing import Optional, Tuple
 import logging
-from huggingface_hub import login
-import requests
-
-login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-
-
-MODEL_CACHE_DIR = Path("models")
-MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
+from google.cloud import aiplatform
+from google.cloud.aiplatform.gapic.schema import predict
+from google.protobuf import json_format
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 _pipeline: Optional[StableDiffusionXLPipeline] = None
 _initialized: bool = False
+
+VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "projects/{project}/locations/{location}/publishers/google/models/imagen-4.0-generate-preview-06-06")
 
 
 def ensure_model_downloaded() -> None:
@@ -47,12 +46,6 @@ def get_pipeline() -> StableDiffusionXLPipeline:
             MODEL_ID,
             torch_dtype=torch_dtype
         )
-        # torch.compile (PyTorch 2.0+) — не используем на CPU, вызывает ошибки
-        # try:
-        #     pipe.unet = torch.compile(pipe.unet)
-        #     logger.info("UNet compiled with torch.compile")
-        # except Exception as e:
-        #     logger.warning(f"torch.compile not available or failed: {e}")
         _pipeline = pipe
         _initialized = True
         logger.info(f"SDXL 1.0 pipeline initialized successfully on {device}")
@@ -74,28 +67,39 @@ def warmup_pipeline() -> None:
         logger.warning(f"Warmup failed: {e}")
 
 
+def _get_model_path() -> str:
+    project = VERTEX_PROJECT
+    location = VERTEX_LOCATION
+    if not project:
+        raise RuntimeError("VERTEX_PROJECT env var is required for Vertex AI Imagen usage.")
+    return IMAGEN_MODEL.format(project=project, location=location)
+
+
 def generate_image(prompt: str) -> Tuple[bytes, str]:
-    api_key = os.getenv("STABILITY_API_KEY")
-    url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "image/*"
-    }
-    files = {
-        "prompt": (None, prompt),
-        "output_format": (None, "png")
-    }
+    """
+    Генерирует изображение через Vertex AI Imagen API.
+    Возвращает (image_bytes, image_base64).
+    """
     try:
-        response = requests.post(url, headers=headers, files=files)
-        if response.status_code == 200:
-            image_bytes = response.content
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-            return image_bytes, image_base64
-        else:
-            logging.error(f"Stability API error: {response.status_code} {response.text}")
+        aiplatform.init(project=VERTEX_PROJECT, location=VERTEX_LOCATION)
+        endpoint = _get_model_path()
+        prediction_client = aiplatform.gapic.PredictionServiceClient()
+        instance = {"prompt": prompt}
+        instances = [instance]
+        parameters = {"sampleCount": 1}
+        response = prediction_client.predict(
+            endpoint=endpoint,
+            instances=[json_format.ParseDict(instance, predict.instance.ImageGenerationPredictionInstance())],
+            parameters=json_format.ParseDict(parameters, predict.params.ImageGenerationPredictionParams())
+        )
+        if not response.predictions:
+            logger.error("No predictions returned from Vertex Imagen.")
             return _create_placeholder_image()
+        image_b64 = response.predictions[0]["bytesBase64Encoded"]
+        image_bytes = base64.b64decode(image_b64)
+        return image_bytes, image_b64
     except Exception as e:
-        logging.error(f"Image generation failed: {e}")
+        logger.error(f"Vertex Imagen generation failed: {e}")
         return _create_placeholder_image()
 
 
@@ -112,3 +116,18 @@ def _create_placeholder_image() -> Tuple[bytes, str]:
     img_bytes = img_byte_array.getvalue()
     img_base64 = base64.b64encode(img_bytes).decode('utf-8')
     return img_bytes, img_base64
+
+MODEL_CACHE_DIR = Path("models")
+MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
+
+async def test_vertex_ai_connection() -> str:
+    """Тестирует подключение к Vertex AI Imagen."""
+    try:
+        loop = asyncio.get_event_loop()
+        # Используем run_in_executor для вызова sync функции generate_image
+        image_bytes, image_b64 = await loop.run_in_executor(None, generate_image, "test connection")
+        if image_bytes and image_b64:
+            return "Vertex AI Imagen connection successful. Image generated."
+        return "Vertex AI Imagen connection failed: no image returned."
+    except Exception as e:
+        return f"Vertex AI Imagen connection error: {str(e)}"

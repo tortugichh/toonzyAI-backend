@@ -18,4 +18,15 @@ alembic/versions/*.pyc
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Google Cloud credentials
+*.json
+service-account-key/
+service-account-key.json
+gcp-key.json
+
+# Environment variables
+.env
+.env.*
+!.env.example 

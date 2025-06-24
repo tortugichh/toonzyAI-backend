@@ -1,37 +1,44 @@
-# ToonzyAI Avatar Generation Backend
+# ToonzyAI Backend
 
-This service generates personalized cartoon avatars from text prompts using a LangChain agent and Hugging Face diffusion models.
-
-## Features
-- Accepts creative prompts and user IDs via API
-- Uses LangChain agent to orchestrate prompt validation, image generation, and moderation
-- Stores prompt, image, and metadata in a PostgreSQL database
-- Serves images as streams or base64
-- Moderation and logging for security and auditing
-
-## Tech Stack
-- FastAPI
-- Pydantic v2
-- LangChain + langchain-huggingface
-- Hugging Face FLUX.1-dev model
-- AsyncPG + SQLAlchemy 2.0 (async)
+This service generates personalized cartoon avatars from text prompts using Vertex AI Imagen.
 
 ## Setup
-1. Clone the repo and `cd backend`
-2. Install dependencies:
+
+1. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Set environment variables in a `.env` file:
-   ```env
-   DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/toonzyai
-   HUGGINGFACEHUB_API_TOKEN=your_huggingface_token
-   ```
-4. Run migrations to set up the database (see below)
-5. Start the server:
+
+2. Configure Google Cloud:
+   - Create a service account in Google Cloud Console
+   - Download the service account key (JSON)
+   - Save the key file in a secure location
+   - Add the following to your `.env` file:
+     ```bash
+     # Google Cloud & Vertex AI
+     GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json
+     VERTEX_PROJECT=extended-bongo-463404-r3
+     VERTEX_LOCATION=us-central1
+     
+     # Database
+     DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/toonzyai
+     ```
+
+3. Run the server:
    ```bash
-   uvicorn main:app --reload
+   uvicorn main:app --host 0.0.0.0 --port 8000
    ```
+
+## Features
+
+- Text-to-image generation using Google Cloud Vertex AI Imagen
+- Async PostgreSQL database for storing prompts and results
+- FastAPI backend with full API documentation
+- Docker support for easy deployment
+
+## API Documentation
+
+Once running, visit http://localhost:8000/docs for the full API documentation.
 
 ## API Endpoints
 - `POST /avatars/` — Generate avatar from prompt

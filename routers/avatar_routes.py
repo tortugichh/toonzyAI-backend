@@ -5,6 +5,7 @@ from utils.avatar_agent import generate_avatar
 from uuid import UUID
 from fastapi.responses import FileResponse
 import os
+from utils.model_manager import test_vertex_ai_connection
 
 logger = logging.getLogger(__name__)
 
@@ -129,3 +130,11 @@ def get_avatar_file(avatar_id: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(file_path, media_type="image/png")
+
+@router.get("/avatars/vertex-ai-test")
+async def vertex_ai_test():
+    try:
+        result = await test_vertex_ai_connection()
+        return {"status": "success", "result": result}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}

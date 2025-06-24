@@ -1,20 +1,24 @@
-fastapi
-uvicorn[standard]
-pydantic
-python-dotenv
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
 
-diffusers==0.25.0
+# AI/ML dependencies
 torch==2.2.2
-transformers
+transformers>=4.30.0
 accelerate
 safetensors
-Pillow
+Pillow>=10.0.0
 numpy<2
 
-huggingface_hub==0.23.0
-sqlalchemy
-asyncpg
-psycopg2-binary
+# Database
+sqlalchemy>=2.0.0
+asyncpg>=0.28.0
+psycopg2-binary>=2.9.9
+
 moviepy
 imageio
 imageio-ffmpeg
+
+google-cloud-aiplatform
+ 
