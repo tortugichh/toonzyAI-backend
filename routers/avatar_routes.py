@@ -3,6 +3,8 @@ from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import logging
 from utils.avatar_agent import generate_avatar
 from uuid import UUID
+from fastapi.responses import FileResponse
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +122,10 @@ def get_avatar_image(avatar_id: UUID):
     if not avatar or not avatar.image_data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Avatar not found or has no image data")
     return StreamingResponse(io.BytesIO(avatar.image_data), media_type="image/png")
+
+@router.get("/avatars/{avatar_id}/file", response_class=FileResponse)
+def get_avatar_file(avatar_id: str):
+    file_path = f"static/avatars/{avatar_id}.png"
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(file_path, media_type="image/png")
