@@ -79,7 +79,7 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
     url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Accept": "image/png"
+        "Accept": "image/*"
     }
     files = {
         "prompt": (None, prompt),
