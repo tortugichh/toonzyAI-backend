@@ -3,7 +3,7 @@ from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse
 import logging
 from utils.avatar_agent import generate_avatar
 import os
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from utils.model_manager import test_vertex_ai_connection
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,11 @@ async def vertex_ai_test():
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
-@router.get("/avatars/{avatar_id}/file", response_class=FileResponse)
+@router.get("/avatars/{avatar_id}/file")
 def get_avatar_file(avatar_id: str):
-    """Возвращает файл изображения по ID."""
-    file_path = f"static/avatars/{avatar_id}.png"
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(file_path, media_type="image/png")
+    """Редиректит на публичный URL изображения в GCS."""
+    bucket_name = os.getenv("GCS_BUCKET")
+    if not bucket_name:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET not configured")
+    public_url = f"https://storage.googleapis.com/{bucket_name}/avatars/{avatar_id}.png"
+    return RedirectResponse(public_url)
