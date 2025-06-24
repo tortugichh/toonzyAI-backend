@@ -24,8 +24,8 @@ async def vertex_ai_test():
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
-@router.get("/avatars/{avatar_id}/file")
-def get_avatar_file(avatar_id: str):
+@router.get("/avatars/{avatar_id}/image")
+def get_avatar_image(avatar_id: str):
     """Возвращает изображение из GCS по ID."""
     bucket_name = os.getenv("GCS_BUCKET")
     if not bucket_name:
