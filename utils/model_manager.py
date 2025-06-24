@@ -7,8 +7,7 @@ from typing import Optional, Tuple
 import logging
 import asyncio
 from google.cloud import aiplatform
-from google.cloud.aiplatform.gapic.schema import predict
-from google.protobuf import json_format
+from google.cloud.aiplatform.gapic import PredictionServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +31,13 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
     try:
         aiplatform.init(project=VERTEX_PROJECT, location=VERTEX_LOCATION)
         endpoint = _get_model_path()
-        prediction_client = aiplatform.gapic.PredictionServiceClient()
+        prediction_client = PredictionServiceClient()
         instance = {"prompt": prompt}
         parameters = {"sampleCount": 1}
         response = prediction_client.predict(
             endpoint=endpoint,
-            instances=[json_format.ParseDict(instance, predict.instance.ImageGenerationPredictionInstance())],
-            parameters=json_format.ParseDict(parameters, predict.params.ImageGenerationPredictionParams())
+            instances=[instance],
+            parameters=parameters
         )
         if not response.predictions:
             logger.error("No predictions returned from Vertex Imagen.")
