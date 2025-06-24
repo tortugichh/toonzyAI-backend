@@ -81,12 +81,12 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
         "Authorization": f"Bearer {api_key}",
         "Accept": "image/png"
     }
-    data = {
-        "prompt": prompt,
-        "output_format": "png"
+    files = {
+        "prompt": (None, prompt),
+        "output_format": (None, "png")
     }
     try:
-        response = requests.post(url, headers=headers, data=data)
+        response = requests.post(url, headers=headers, files=files)
         if response.status_code == 200:
             image_bytes = response.content
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
