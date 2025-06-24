@@ -1,29 +1,23 @@
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from fastapi.responses import JSONResponse
-from utils.model_manager import warmup_pipeline
-import threading
-from routers.avatar_routes import router as avatar_router
 from fastapi.staticfiles import StaticFiles
+from routers import avatar_routes
+from middleware.logging import LoggingMiddleware
 
 # Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Загружаем переменные окружения
 load_dotenv()
 
-
-
 app = FastAPI(
-    title="ToonzyAI Avatar Generation API",
-    description="API for generating AI avatars",
+    title="ToonzyAI API",
+    description="API for generating cartoon avatars using Vertex AI Imagen",
     version="1.0.0"
 )
 
@@ -36,13 +30,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Logging middleware
+app.add_middleware(LoggingMiddleware)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Базовые маршруты для тестирования
+# Подключаем роутеры
+app.include_router(avatar_routes.router, prefix="/api/v1", tags=["avatars"])
+
 @app.get("/")
 async def root():
-    logger.info("Root endpoint accessed")
-    return {"message": "ToonzyAI Avatar Generation API is running", "status": "ok"}
+    return {"message": "Welcome to ToonzyAI API"}
 
 @app.get("/health")
 async def health():
@@ -66,8 +64,6 @@ async def startup_event():
     else:
         logger.warning("DATABASE_URL not found in environment variables")
     
-    # Прогрев модели в отдельном потоке
-    threading.Thread(target=warmup_pipeline, daemon=True).start()
     logger.info("Startup completed successfully")
 
 # Shutdown event
@@ -75,21 +71,13 @@ async def startup_event():
 async def shutdown_event():
     logger.info("Shutting down ToonzyAI API...")
 
-# Импортируем роутеры - убираем try-catch для отладки
-logger.info("Loading avatar routes...")
-app.include_router(avatar_router, prefix="/avatars", tags=["avatars"])
-logger.info("Avatar routes loaded successfully")
-
-logger.info("Loading storyboard routes...")
-logger.info("Storyboard routes loaded successfully")
-
 # Обработчик ошибок
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception: {exc}")
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
+        content={"detail": "Internal server error"}
     )
 
 if __name__ == "__main__":
