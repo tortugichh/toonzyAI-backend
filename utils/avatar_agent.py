@@ -9,6 +9,7 @@ from utils.model_manager import generate_image
 
 logger = logging.getLogger(__name__)
 
+
 class AgentResult(BaseModel):
     is_blocked: bool
     reason: Optional[str] = None
