@@ -5,7 +5,7 @@ from utils.avatar_agent import generate_avatar
 import os
 from google.cloud import storage
 from utils.model_manager import test_vertex_ai_connection
-from db.avatar_repository import test_database_connection, get_avatar_by_id
+from db.avatar_repository import test_database_connection, get_avatar_by_id, count_avatars
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,16 @@ async def get_avatar(avatar_id: str):
     except Exception as e:
         logger.error(f"Error getting avatar {avatar_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/avatars/count")
+async def get_avatars_count():
+    """Возвращает количество аватаров в базе данных."""
+    try:
+        count = await count_avatars()
+        return {"count": count, "status": "success"}
+    except Exception as e:
+        logger.error(f"Error counting avatars: {e}")
+        return {"status": "error", "detail": str(e)}
 
 @router.get("/avatars/{avatar_id}/image")
 def get_avatar_image(avatar_id: str):

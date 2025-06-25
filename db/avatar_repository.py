@@ -42,23 +42,18 @@ async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data:
     """Вставляет новый аватар в базу данных."""
     try:
         async with async_session() as session:
-            # ИСПРАВЛЕНИЕ: Добавляем начало транзакции
-            async with session.begin():
-                avatar = Avatar(
-                    id=avatar_id,
-                    user_id=user_id,
-                    prompt=prompt,
-                    image_data=image_data,
-                    status=status,
-                    moderation_flags=','.join(moderation_flags) if moderation_flags else None
-                )
-                session.add(avatar)
-                # ИСПРАВЛЕНИЕ: commit() теперь происходит автоматически при выходе из begin()
-                # await session.commit() - убираем, так как используем session.begin()
-                
-                # Добавляем refresh для получения сгенерированных значений
-                await session.refresh(avatar)
-                return avatar.id
+            avatar = Avatar(
+                id=avatar_id,
+                user_id=user_id,
+                prompt=prompt,
+                image_data=image_data,
+                status=status,
+                moderation_flags=','.join(moderation_flags) if moderation_flags else None
+            )
+            session.add(avatar)
+            await session.commit()
+            # Возвращаем ID напрямую, не используя refresh
+            return avatar_id
     except Exception as e:
         print(f"Error inserting avatar: {e}")
         raise
@@ -78,12 +73,11 @@ async def update_avatar_status(avatar_id: UUID, status: str, image_data: Optiona
     """Обновляет статус аватара."""
     try:
         async with async_session() as session:
-            async with session.begin():
-                stmt = update(Avatar).where(Avatar.id == avatar_id).values(status=status)
-                if image_data:
-                    stmt = stmt.values(image_data=image_data)
-                await session.execute(stmt)
-                # commit() происходит автоматически при выходе из begin()
+            stmt = update(Avatar).where(Avatar.id == avatar_id).values(status=status)
+            if image_data:
+                stmt = stmt.values(image_data=image_data)
+            await session.execute(stmt)
+            await session.commit()
     except Exception as e:
         print(f"Error updating avatar status: {e}")
         raise
