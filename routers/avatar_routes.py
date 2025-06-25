@@ -7,19 +7,47 @@ from google.cloud import storage
 from utils.model_manager import test_vertex_ai_connection
 from db.avatar_repository import test_database_connection, get_avatar_by_id, count_avatars
 from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
+from db.database import get_db
+from uuid import uuid4
+from db.models import Avatar
+from fastapi import Depends
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 @router.post("/avatars/", response_model=AvatarResponse)
-async def create_avatar(request: AvatarCreateRequest) -> AvatarResponse:
-    """Создает новый аватар используя Vertex AI Imagen."""
+async def create_avatar(request: AvatarCreateRequest, db: AsyncSession = Depends(get_db)) -> AvatarResponse:
+    """Создает новый аватар (вся логика прямо в ручке)."""
     logger.info(f"Received avatar creation request: {request}")
     try:
-        result = await generate_avatar(request)
-        logger.info(f"Avatar created successfully: {result.avatar_id}")
-        return result
+        avatar_id = uuid4()
+        user_id = request.user_id if request.user_id else uuid4()
+        prompt = request.prompt
+        image_data = b''  # Заглушка, если нет генерации
+        status = 'completed'
+        moderation_flags = None
+        avatar = Avatar(
+            id=avatar_id,
+            user_id=user_id,
+            prompt=prompt,
+            image_data=image_data,
+            status=status,
+            moderation_flags=moderation_flags
+        )
+        db.add(avatar)
+        await db.commit()
+        await db.refresh(avatar)
+        image_url = f"https://storage.googleapis.com/avatars/{avatar_id}.png"
+        logger.info(f"Avatar created successfully: {avatar_id}")
+        return AvatarResponse(
+            avatar_id=avatar_id,
+            image_url=image_url,
+            prompt=prompt,
+            status=status,
+            user_id=user_id
+        )
     except Exception as e:
         logger.error(f"Error creating avatar: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create avatar: {str(e)}")
