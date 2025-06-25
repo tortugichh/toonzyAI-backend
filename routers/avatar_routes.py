@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 @router.post("/avatars/", response_model=AvatarResponse)
 async def create_avatar(request: AvatarCreateRequest, db: AsyncSession = Depends(get_db)) -> AvatarResponse:
     """Создает новый аватар (вся логика прямо в ручке)."""
