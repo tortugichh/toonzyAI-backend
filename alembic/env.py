@@ -6,10 +6,25 @@ from alembic import context
 import os
 import sys
 import asyncio
+from dotenv import load_dotenv
 
-# Добавляем путь к корневой директории
+# Загружаем переменные окружения из .env
+load_dotenv()
+
+# Добавляем корень проекта в путь импорта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Получаем объект конфигурации Alembic
+config = context.config
+
+# Подставляем переменную DATABASE_URL из .env в конфиг Alembic
+config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
+
+# Настройка логгирования
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# Импорт базы моделей
 try:
     from db.avatar_repository import Base
 except ImportError as e:
@@ -17,12 +32,7 @@ except ImportError as e:
     from sqlalchemy.orm import declarative_base
     Base = declarative_base()
 
-config = context.config
-
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
+# Метаданные для генерации миграций
 target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
@@ -57,6 +67,7 @@ def do_run_migrations(connection: Connection) -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+# Определяем, в каком режиме запущен alembic
 if context.is_offline_mode():
     run_migrations_offline()
 else:
