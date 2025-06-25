@@ -77,7 +77,7 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
         image_url = upload_image_to_gcs(image_bytes, f"avatars/{avatar_id}.png")
         # Сохраняем в БД
         user_id = uuid.uuid4()  # TODO: заменить на реальный user_id, если появится аутентификация
-        insert_avatar(
+        await insert_avatar(
             user_id=user_id,
             prompt=request.prompt,
             image_data=image_bytes,
