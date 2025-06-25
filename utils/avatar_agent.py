@@ -7,6 +7,7 @@ import uuid
 import logging
 from utils.model_manager import generate_image
 from utils.gcs_client import upload_image_to_gcs
+from db.avatar_repository import insert_avatar
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,16 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
         image_bytes, _ = generate_image(request.prompt)
         # Загружаем изображение в GCS
         image_url = upload_image_to_gcs(image_bytes, f"avatars/{avatar_id}.png")
-        logger.info(f"Avatar generated and uploaded: {image_url}")
+        # Сохраняем в БД
+        user_id = uuid.uuid4()  # TODO: заменить на реальный user_id, если появится аутентификация
+        insert_avatar(
+            user_id=user_id,
+            prompt=request.prompt,
+            image_data=image_bytes,
+            status="completed",
+            moderation_flags=None
+        )
+        logger.info(f"Avatar generated, uploaded and saved: {image_url}")
         return AvatarResponse(avatar_id=avatar_id, image_url=image_url)
     except Exception as e:
         logger.error(f"Failed to generate avatar: {e}")
