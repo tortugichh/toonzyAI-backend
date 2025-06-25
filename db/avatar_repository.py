@@ -1,7 +1,7 @@
-from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text
+from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func
 from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.sql import func, select, update
+from sqlalchemy.sql import select, update
 from uuid import uuid4, UUID
 from typing import Optional, List
 import os
@@ -80,6 +80,17 @@ async def update_avatar_status(avatar_id: UUID, status: str, image_data: Optiona
             await session.commit()
     except Exception as e:
         print(f"Error updating avatar status: {e}")
+        raise
+
+async def count_avatars() -> int:
+    """Возвращает количество аватаров в базе данных."""
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(func.count(Avatar.id)))
+            count = result.scalar()
+            return count or 0
+    except Exception as e:
+        print(f"Error counting avatars: {e}")
         raise
 
 # Дополнительная функция для проверки подключения к БД
