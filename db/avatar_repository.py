@@ -26,9 +26,10 @@ class Avatar(Base):
     status = mapped_column(String, nullable=False)
     moderation_flags = mapped_column(Text, nullable=True)  # comma-separated
 
-async def insert_avatar(user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None) -> UUID:
+async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None) -> UUID:
     async with async_session() as session:
         avatar = Avatar(
+            id=avatar_id,
             user_id=user_id,
             prompt=prompt,
             image_data=image_data,

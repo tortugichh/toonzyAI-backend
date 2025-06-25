@@ -84,6 +84,7 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
         
         # Сохраняем в БД
         await insert_avatar(
+            avatar_id=avatar_id,
             user_id=user_id,
             prompt=request.prompt,
             image_data=image_bytes,
