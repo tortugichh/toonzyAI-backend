@@ -70,13 +70,19 @@ def generate_avatar_with_agent(prompt: str) -> AvatarGenerationResult:
         )
 
 async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
-    avatar_id = str(uuid.uuid4())
+    # Генерируем UUID для аватара
+    avatar_id = uuid.uuid4()
     try:
+        # Генерируем изображение
         image_bytes, _ = generate_image(request.prompt)
+        
         # Загружаем изображение в GCS
         image_url = upload_image_to_gcs(image_bytes, f"avatars/{avatar_id}.png")
+        
+        # Используем user_id из запроса или генерируем новый
+        user_id = request.user_id or uuid.uuid4()
+        
         # Сохраняем в БД
-        user_id = uuid.uuid4()  # TODO: заменить на реальный user_id, если появится аутентификация
         await insert_avatar(
             user_id=user_id,
             prompt=request.prompt,
@@ -84,8 +90,15 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
             status="completed",
             moderation_flags=None
         )
-        logger.info(f"Avatar generated, uploaded and saved: {image_url}")
-        return AvatarResponse(avatar_id=avatar_id, image_url=image_url)
+        
+        logger.info(f"Avatar generated and saved: {image_url}")
+        return AvatarResponse(
+            avatar_id=avatar_id,
+            image_url=image_url,
+            prompt=request.prompt,
+            status="completed",
+            user_id=user_id
+        )
     except Exception as e:
         logger.error(f"Failed to generate avatar: {e}")
         raise
