@@ -7,10 +7,14 @@ from typing import Optional, List
 import os
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from fastapi import Depends
 
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_async_engine(DATABASE_URL, echo=False)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 # Проверяем наличие DATABASE_URL
 if not DATABASE_URL:
@@ -26,6 +30,10 @@ async_session = async_sessionmaker(
     expire_on_commit=False
 )
 
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
+
 Base = declarative_base()
 
 class Avatar(Base):
@@ -38,25 +46,21 @@ class Avatar(Base):
     status = mapped_column(String, nullable=False)
     moderation_flags = mapped_column(Text, nullable=True)  # comma-separated
 
-async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None) -> UUID:
+async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None, db: AsyncSession = Depends(get_db)) -> UUID:
     """Вставляет новый аватар в базу данных."""
-    try:
-        async with async_session() as session:
-            avatar = Avatar(
-                id=avatar_id,
-                user_id=user_id,
-                prompt=prompt,
-                image_data=image_data,
-                status=status,
-                moderation_flags=','.join(moderation_flags) if moderation_flags else None
-            )
-            session.add(avatar)
-            await session.commit()
-            # Возвращаем ID напрямую, не используя refresh
-            return avatar_id
-    except Exception as e:
-        print(f"Error inserting avatar: {e}")
-        raise
+    avatar = Avatar(
+        id=avatar_id,
+        user_id=user_id,
+        prompt=prompt,
+        image_data=image_data,
+        status=status,
+        moderation_flags=','.join(moderation_flags) if moderation_flags else None
+    )
+    db.add(avatar)
+    await db.commit()
+    await db.refresh(avatar)
+    # Возвращаем ID напрямую, не используя refresh
+    return avatar_id
 
 async def get_avatar_by_id(avatar_id: UUID) -> Optional[Avatar]:
     """Получает аватар по ID."""
