@@ -13,12 +13,16 @@ services:
       - ./static:/app/static
       - .:/app
       - ./service-account-key:/app/service-account-key
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key/key.json
-      - VERTEX_PROJECT=extended-bongo-463404-r3
-      - VERTEX_LOCATION=us-central1
-      - GCS_PROJECT=extended-bongo-463404-r3
-      - GCS_BUCKET=toonzyai
+
+  db:
+    image: postgres:15
+    container_name: toonzyai-db
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
 volumes:
   postgres_data:
