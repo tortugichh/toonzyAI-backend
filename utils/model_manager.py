@@ -25,6 +25,7 @@ def _get_model_path() -> str:
         raise RuntimeError("VERTEX_PROJECT env var is required for Vertex AI Imagen usage.")
     return IMAGEN_MODEL.format(project=project, location=location)
 
+
 def generate_image(prompt: str) -> Tuple[bytes, str]:
     """
     Генерирует изображение через Vertex AI Imagen API.
