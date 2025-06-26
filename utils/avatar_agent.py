@@ -8,6 +8,7 @@ import logging
 from utils.model_manager import generate_image
 from utils.gcs_client import upload_image_to_gcs
 from db.avatar_repository import insert_avatar
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +71,10 @@ def generate_avatar_with_agent(prompt: str) -> AvatarGenerationResult:
             moderation_flags=["generation_error"]
         )
 
-async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
-    """Генерирует аватар по запросу."""
+async def generate_avatar(request: AvatarCreateRequest, user_id: UUID) -> AvatarResponse:
+    """Генерирует аватар по запросу для конкретного пользователя."""
     # Генерируем UUID для аватара
     avatar_id = uuid.uuid4()
-    
-    # Используем user_id из запроса или генерируем новый
-    user_id = request.user_id or uuid.uuid4()
     
     logger.info(f"Starting avatar generation for user {user_id}, avatar {avatar_id}")
     
@@ -112,28 +110,13 @@ async def generate_avatar(request: AvatarCreateRequest) -> AvatarResponse:
             image_url=image_url,
             prompt=request.prompt,
             status="completed",
-            user_id=user_id
+            user_id=user_id,
+            created_at=datetime.utcnow()
         )
         
         logger.info(f"Avatar generation completed successfully: {response}")
         return response
-        
+    
     except Exception as e:
-        logger.error(f"Failed to generate avatar: {e}", exc_info=True)
-        
-        # Попытаемся сохранить информацию об ошибке в БД
-        try:
-            await insert_avatar(
-                avatar_id=avatar_id,
-                user_id=user_id,
-                prompt=request.prompt,
-                image_data=b"",
-                status="failed",
-                moderation_flags=["generation_error"]
-            )
-            logger.info(f"Error info saved to database for avatar {avatar_id}")
-        except Exception as db_error:
-            logger.error(f"Failed to save error info to database: {db_error}")
-        
-        # Повторно поднимаем исключение для обработки на уровне API
-        raise
+        logger.error(f"Avatar generation failed for user {user_id}: {e}", exc_info=True)
+        raise Exception(f"Avatar generation failed: {str(e)}")

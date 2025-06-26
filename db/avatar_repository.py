@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func
+from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean
 from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.sql import select, update
@@ -36,6 +36,17 @@ async def get_db() -> AsyncSession:
 
 Base = declarative_base()
 
+class User(Base):
+    __tablename__ = "users"
+    id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    username = mapped_column(String(50), unique=True, nullable=False, index=True)
+    email = mapped_column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = mapped_column(String(255), nullable=False)
+    is_active = mapped_column(Boolean, default=True, nullable=False)
+    is_verified = mapped_column(Boolean, default=False, nullable=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 class Avatar(Base):
     __tablename__ = "avatars"
     id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -58,7 +69,7 @@ async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data:
     )
     db.add(avatar)
     await db.commit()
-    await db.refresh(avatar)
+    await db.refresh
     # Возвращаем ID напрямую, не используя refresh
     return avatar_id
 

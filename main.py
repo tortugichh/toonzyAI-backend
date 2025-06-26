@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from routers import avatar_routes
+from routers import avatar_routes, auth_routes
 from middleware.logging import LoggingMiddleware
 
 
@@ -19,17 +19,31 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="ToonzyAI API",
-    description="API for generating cartoon avatars using Vertex AI Imagen",
-    version="1.0.0"
+    description="API for generating cartoon avatars using Vertex AI Imagen with JWT Authentication",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# CORS middleware
+# CORS middleware with security considerations
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",  # React dev server
+        "http://localhost:8000",  # FastAPI dev server
+        "https://your-frontend-domain.com",  # Production frontend domain
+        # Add your actual frontend domains here
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language", 
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With"
+    ],
 )
 
 # Logging middleware
@@ -39,6 +53,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Подключаем роутеры
 app.include_router(avatar_routes.router, prefix="/api/v1", tags=["avatars"])
+app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["authentication"])
 
 @app.get("/")
 async def root():
