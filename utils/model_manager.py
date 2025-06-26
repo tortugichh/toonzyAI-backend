@@ -6,6 +6,8 @@ import base64
 from typing import Optional, Tuple
 import logging
 import asyncio
+from dotenv import load_dotenv
+load_dotenv()
 from google.cloud import aiplatform
 from google.cloud.aiplatform.gapic import PredictionServiceClient
 
