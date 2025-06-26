@@ -8,12 +8,14 @@ from fastapi.staticfiles import StaticFiles
 from routers import avatar_routes
 from middleware.logging import LoggingMiddleware
 
+
+load_dotenv()
+
+
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Загружаем переменные окружения
-load_dotenv()
 
 app = FastAPI(
     title="ToonzyAI API",

@@ -1,10 +1,12 @@
 from google.cloud import storage
 import os
-
-GCS_BUCKET = os.getenv("GCS_BUCKET")
-GCS_PROJECT = os.getenv("GCS_PROJECT")
+from dotenv import load_dotenv
+load_dotenv()
 
 def upload_image_to_gcs(image_bytes: bytes, filename: str) -> str:
+    GCS_BUCKET = os.getenv("GCS_BUCKET")
+    GCS_PROJECT = os.getenv("GCS_PROJECT")
+    print("GCS_BUCKET inside upload_image_to_gcs:", GCS_BUCKET)
     client = storage.Client(project=GCS_PROJECT)
     bucket = client.bucket(GCS_BUCKET)
     blob = bucket.blob(filename)
