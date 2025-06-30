@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from typing import Dict, Any
@@ -13,8 +13,7 @@ from schemas.auth_schemas import (
 from utils.auth import (
     get_password_hash, authenticate_user, create_tokens,
     get_current_active_user, verify_token, get_user_by_id,
-    get_user_by_username, get_user_by_email, verify_password,
-    security
+    get_user_by_username, get_user_by_email, verify_password
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +75,34 @@ async def register_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during registration"
         )
+
+
+@router.post("/token", response_model=Token)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db)
+) -> Token:
+    """OAuth2 compatible token login (for Swagger UI)."""
+    logger.info(f"OAuth2 login attempt for username: {form_data.username}")
+    
+    user = await authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        logger.warning(f"Failed OAuth2 login attempt for username: {form_data.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled"
+        )
+    
+    tokens = create_tokens(user)
+    logger.info(f"OAuth2 user logged in successfully: {user.username}")
+    return Token(**tokens)
 
 
 @router.post("/login", response_model=Token)
@@ -228,7 +255,6 @@ async def change_password(
 
 @router.post("/logout", response_model=Dict[str, str])
 async def logout(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_active_user)
 ) -> Dict[str, str]:
     """Logout user (client should delete token)."""

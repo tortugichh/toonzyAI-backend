@@ -107,7 +107,7 @@ async def generate_avatar(request: AvatarCreateRequest, user_id: UUID) -> Avatar
         
         response = AvatarResponse(
             avatar_id=avatar_id,
-            image_url=image_url,
+            image_url=f"/api/v1/avatars/{avatar_id}/image",
             prompt=request.prompt,
             status="completed",
             user_id=user_id,
@@ -116,7 +116,7 @@ async def generate_avatar(request: AvatarCreateRequest, user_id: UUID) -> Avatar
         
         logger.info(f"Avatar generation completed successfully: {response}")
         return response
-    
+        
     except Exception as e:
         logger.error(f"Avatar generation failed for user {user_id}: {e}", exc_info=True)
         raise Exception(f"Avatar generation failed: {str(e)}")

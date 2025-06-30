@@ -1,17 +1,15 @@
 import os
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from routers import avatar_routes, auth_routes
+from dotenv import load_dotenv
+from routers import avatar_routes, auth_routes, animation_routes
 from middleware.logging import LoggingMiddleware
-
+from contextlib import asynccontextmanager
 
 load_dotenv()
-
-
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -49,25 +47,23 @@ app.add_middleware(
 # Logging middleware
 app.add_middleware(LoggingMiddleware)
 
+# Create static directory if it doesn't exist
+os.makedirs("static", exist_ok=True)
+
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Подключаем роутеры
 app.include_router(avatar_routes.router, prefix="/api/v1", tags=["avatars"])
 app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["authentication"])
-
-@app.get("/")
-async def root():
-    return {"message": "Welcome to ToonzyAI API"}
+app.include_router(animation_routes.router, prefix="/api/v1/animations", tags=["animations"])
 
 @app.get("/health")
 async def health():
     logger.info("Health check endpoint accessed")
     return {"status": "healthy", "version": "1.0.0"}
 
-@app.get("/test")
-async def test():
-    logger.info("Test endpoint accessed")
-    return {"test": "API is working properly"}
+# Test and demo endpoints removed
 
 # Startup event
 @app.on_event("startup")

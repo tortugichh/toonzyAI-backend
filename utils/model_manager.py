@@ -10,12 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 from google.cloud import aiplatform
 from google.cloud.aiplatform.gapic import PredictionServiceClient
+import time
 
 logger = logging.getLogger(__name__)
 
 VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
-VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-east1")
 IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "projects/{project}/locations/{location}/publishers/google/models/imagen-4.0-generate-preview-06-06")
+GCS_BUCKET = os.getenv("GCS_BUCKET")
+RUNWAY_API_KEY = os.getenv("RUNWAY_API_KEY")
 
 def _get_model_path() -> str:
     """Получает полный путь к модели Imagen."""

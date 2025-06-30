@@ -1,10 +1,11 @@
-from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean
-from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column
+from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean, Integer, ForeignKey, Enum
+from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.sql import select, update
 from uuid import uuid4, UUID
 from typing import Optional, List
 import os
+import enum
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from fastapi import Depends
@@ -36,6 +37,14 @@ async def get_db() -> AsyncSession:
 
 Base = declarative_base()
 
+class AnimationStatus(enum.Enum):
+    """Статусы для анимационных проектов и сегментов."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ASSEMBLING = "assembling"
+
 class User(Base):
     __tablename__ = "users"
     id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -57,21 +66,62 @@ class Avatar(Base):
     status = mapped_column(String, nullable=False)
     moderation_flags = mapped_column(Text, nullable=True)  # comma-separated
 
-async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None, db: AsyncSession = Depends(get_db)) -> UUID:
+class AnimationProject(Base):
+    """Проект анимации - контейнер для серии видео-сегментов."""
+    __tablename__ = "animation_projects"
+    
+    id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    source_avatar_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("avatars.id"), nullable=False)
+    
+    total_segments = mapped_column(Integer, nullable=False)
+    animation_prompt = mapped_column(Text, nullable=False)
+    status = mapped_column(Enum(AnimationStatus), default=AnimationStatus.PENDING, nullable=False)
+    final_video_url = mapped_column(String, nullable=True)
+    
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    segments = relationship("AnimationSegment", back_populates="project", cascade="all, delete-orphan")
+
+class AnimationSegment(Base):
+    """Отдельный видео-сегмент в анимационном проекте."""
+    __tablename__ = "animation_segments"
+    
+    id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    animation_project_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("animation_projects.id"), nullable=False)
+    
+    segment_number = mapped_column(Integer, nullable=False)
+    status = mapped_column(Enum(AnimationStatus), default=AnimationStatus.PENDING, nullable=False)
+    
+    start_frame_url = mapped_column(String, nullable=False)  # URL картинки-основы для генерации
+    generated_video_url = mapped_column(String, nullable=True)  # URL сгенерированного видео-клипа
+    
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    project = relationship("AnimationProject", back_populates="segments")
+
+async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None) -> UUID:
     """Вставляет новый аватар в базу данных."""
-    avatar = Avatar(
-        id=avatar_id,
-        user_id=user_id,
-        prompt=prompt,
-        image_data=image_data,
-        status=status,
-        moderation_flags=','.join(moderation_flags) if moderation_flags else None
-    )
-    db.add(avatar)
-    await db.commit()
-    await db.refresh
-    # Возвращаем ID напрямую, не используя refresh
-    return avatar_id
+    try:
+        async with async_session() as session:
+            avatar = Avatar(
+                id=avatar_id,
+                user_id=user_id,
+                prompt=prompt,
+                image_data=image_data,
+                status=status,
+                moderation_flags=','.join(moderation_flags) if moderation_flags else None
+            )
+            session.add(avatar)
+            await session.commit()
+            return avatar_id
+    except Exception as e:
+        print(f"Error inserting avatar: {e}")
+        raise
 
 async def get_avatar_by_id(avatar_id: UUID) -> Optional[Avatar]:
     """Получает аватар по ID."""

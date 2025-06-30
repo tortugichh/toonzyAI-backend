@@ -4,8 +4,7 @@ import logging
 from utils.avatar_agent import generate_avatar
 import os
 from google.cloud import storage
-from utils.model_manager import test_vertex_ai_connection
-from db.avatar_repository import test_database_connection, get_avatar_by_id, count_avatars, get_db, User, Avatar
+from db.avatar_repository import get_avatar_by_id, get_db, User, Avatar
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.auth import get_current_active_user
@@ -56,11 +55,16 @@ async def get_user_avatars(
         result = await db.execute(avatars_query)
         avatars = result.scalars().all()
         
+        bucket_name = os.getenv("GCS_BUCKET")
+        if not bucket_name:
+            raise HTTPException(status_code=500, detail="GCS_BUCKET not configured")
+            
         avatar_responses = []
         for avatar in avatars:
+            # Используем наш API эндпоинт вместо прямых GCS ссылок
             avatar_responses.append(AvatarResponse(
                 avatar_id=avatar.id,
-                image_url=f"https://storage.googleapis.com/avatars/{avatar.id}.png",
+                image_url=f"/api/v1/avatars/{avatar.id}/image",
                 prompt=avatar.prompt,
                 status=avatar.status,
                 user_id=avatar.user_id,
@@ -77,26 +81,6 @@ async def get_user_avatars(
     except Exception as e:
         logger.error(f"Error getting avatars for user {current_user.username}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/avatars/vertex-ai-test")
-async def vertex_ai_test(current_user: User = Depends(get_current_active_user)):
-    """Tests Vertex AI Imagen connection (admin only)."""
-    try:
-        result = await test_vertex_ai_connection()
-        return {"status": "success", "result": result}
-    except Exception as e:
-        logger.error(f"Vertex AI test failed: {e}")
-        return {"status": "error", "detail": str(e)}
-
-@router.get("/avatars/database-test")
-async def database_test(current_user: User = Depends(get_current_active_user)):
-    """Tests database connection (admin only)."""
-    try:
-        result = await test_database_connection()
-        return {"status": "success", "result": result}
-    except Exception as e:
-        logger.error(f"Database test failed: {e}")
-        return {"status": "error", "detail": str(e)}
 
 @router.get("/avatars/{avatar_id}")
 async def get_avatar(
@@ -121,6 +105,7 @@ async def get_avatar(
             "user_id": str(avatar.user_id),
             "prompt": avatar.prompt,
             "status": avatar.status,
+            "image_url": f"/api/v1/avatars/{avatar.id}/image",
             "created_at": avatar.created_at.isoformat() if avatar.created_at else None,
             "moderation_flags": avatar.moderation_flags.split(',') if avatar.moderation_flags else None
         }
@@ -132,23 +117,13 @@ async def get_avatar(
         logger.error(f"Error getting avatar {avatar_id} for user {current_user.username}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/avatars/count")
-async def get_avatars_count(current_user: User = Depends(get_current_active_user)):
-    """Gets total count of user's avatars."""
-    try:
-        count = await count_avatars()
-        return {"count": count}
-    except Exception as e:
-        logger.error(f"Error counting avatars: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 @router.get("/avatars/{avatar_id}/image")
 async def get_avatar_image(
     avatar_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Returns avatar image from GCS (only user's own avatars)."""
+    """Returns the avatar image file."""
     try:
         avatar_uuid = UUID(avatar_id)
         avatar = await get_avatar_by_id(avatar_uuid)
@@ -160,26 +135,25 @@ async def get_avatar_image(
         if avatar.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Access denied")
         
-        bucket_name = os.getenv("GCS_BUCKET")
-        if not bucket_name:
-            raise HTTPException(status_code=500, detail="GCS_BUCKET not configured")
-        
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(f"avatars/{avatar_id}.png")
-        
-        if not blob.exists():
-            raise HTTPException(status_code=404, detail="Image not found")
-        
-        image_bytes = blob.download_as_bytes()
-        return Response(content=image_bytes, media_type="image/png")
-        
+        # Return image from database binary data
+        if avatar.image_data:
+            return Response(
+                content=avatar.image_data,
+                media_type="image/png",
+                headers={
+                    "Content-Disposition": f"inline; filename=avatar_{avatar_id}.png",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        else:
+            raise HTTPException(status_code=404, detail="Avatar image not found")
+            
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid avatar ID format")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting avatar image {avatar_id} for user {current_user.username}: {e}")
+        logger.error(f"Error getting avatar image {avatar_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/avatars/{avatar_id}")
@@ -188,37 +162,31 @@ async def delete_avatar(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete avatar (only user's own avatars)."""
+    """Deletes an avatar (only user's own avatars)."""
     try:
         avatar_uuid = UUID(avatar_id)
-        avatar = await get_avatar_by_id(avatar_uuid)
+        
+        # Find avatar and check ownership
+        avatar_query = select(Avatar).where(
+            Avatar.id == avatar_uuid,
+            Avatar.user_id == current_user.id
+        )
+        avatar_result = await db.execute(avatar_query)
+        avatar = avatar_result.scalar_one_or_none()
         
         if not avatar:
-            raise HTTPException(status_code=404, detail="Avatar not found")
+            raise HTTPException(
+                status_code=404, 
+                detail="Avatar not found or you don't have permission to delete it"
+            )
         
-        # Check if avatar belongs to current user
-        if avatar.user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        # Delete from database
-        delete_stmt = delete(Avatar).where(Avatar.id == avatar_uuid)
-        await db.execute(delete_stmt)
+        # Delete avatar from database
+        await db.delete(avatar)
         await db.commit()
         
-        # Optionally delete from GCS
-        try:
-            bucket_name = os.getenv("GCS_BUCKET")
-            if bucket_name:
-                client = storage.Client()
-                bucket = client.bucket(bucket_name)
-                blob = bucket.blob(f"avatars/{avatar_id}.png")
-                if blob.exists():
-                    blob.delete()
-        except Exception as gcs_error:
-            logger.warning(f"Failed to delete image from GCS: {gcs_error}")
-        
         logger.info(f"Avatar {avatar_id} deleted by user {current_user.username}")
-        return {"message": "Avatar deleted successfully"}
+        
+        return {"message": "Avatar deleted successfully", "avatar_id": avatar_id}
         
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid avatar ID format")
@@ -226,5 +194,5 @@ async def delete_avatar(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error deleting avatar {avatar_id} for user {current_user.username}: {e}")
+        logger.error(f"Error deleting avatar {avatar_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
