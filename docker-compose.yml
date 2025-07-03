@@ -1,9 +1,8 @@
-version: '3.8'
-
 services:
   backend:
     build: .
     container_name: toonzyai-backend
+    entrypoint: ["bash", "/app/entrypoint.sh"]
     env_file:
       - .env
     ports:
@@ -13,6 +12,72 @@ services:
       - ./static:/app/static
       - .:/app
       - ./service-account-key:/app/service-account-key
+    depends_on:
+      - db
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis service for Celery message broker and result backend
+  redis:
+    image: redis:7-alpine
+    container_name: toonzyai-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery worker service
+  celery:
+    build: .
+    container_name: toonzyai-celery
+    env_file:
+      - .env
+    command: celery -A celery_worker worker --loglevel=info --queues=generation,assembly,celery
+    volumes:
+      - ./static:/app/static
+      - .:/app
+      - ./service-account-key:/app/service-account-key
+    depends_on:
+      - redis
+      - db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_worker", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Celery Flower for monitoring (uncomment if needed)
+  # flower:
+  #   build: .
+  #   container_name: toonzyai-flower
+  #   env_file:
+  #     - .env
+  #   command: celery -A celery_worker flower --port=5555
+  #   ports:
+  #     - "5555:5555"
+  #   depends_on:
+  #     - redis
+  #     - celery
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:5555"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   db:
     image: postgres:15
@@ -23,7 +88,14 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres_data:
+  redis_data:
  

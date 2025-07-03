@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -22,7 +22,11 @@ from schemas.animation_schemas import (
     AnimationProjectCreate,
     AnimationProjectResponse,
     AnimationProjectListResponse,
-    AssembleVideoResponse
+    AssembleVideoResponse,
+    SegmentGenerateRequest,
+    BatchSegmentPromptsUpdate,
+    GenerateAllSegmentsRequest,
+    BatchGenerationResponse
 )
 from utils.auth import get_current_active_user
 from utils.gcs_client import get_public_url, download_file_from_gcs_authenticated, get_file_size_from_gcs
@@ -570,17 +574,22 @@ async def get_segment_video(
         )
 
 
-@router.head("/{project_id}/video")
-async def get_animation_video_info(
+# ==================== НОВЫЕ ЭНДПОИНТЫ ДЛЯ ПОЛЬЗОВАТЕЛЬСКОГО КОНТРОЛЯ СЕГМЕНТОВ ====================
+
+@router.post("/{project_id}/segments/{segment_number}/generate")
+async def generate_specific_segment(
     project_id: UUID,
+    segment_number: int,
+    generate_data: SegmentGenerateRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Возвращает метаданные видео без загрузки самого контента (для проверки размера).
+    🎬 ПОЛЬЗОВАТЕЛЬСКИЙ КОНТРОЛЬ: Запускает генерацию конкретного сегмента.
+    Пользователь может генерировать каждый кадр когда захочет!
     """
     try:
-        # Получаем проект анимации
+        # Проверяем, что проект принадлежит пользователю
         project_query = select(AnimationProject).where(
             AnimationProject.id == project_id,
             AnimationProject.user_id == current_user.id
@@ -594,41 +603,395 @@ async def get_animation_video_info(
                 detail="Animation project not found"
             )
         
-        if not project.final_video_url:
+        # Находим сегмент
+        segment_query = select(AnimationSegment).where(
+            AnimationSegment.animation_project_id == project_id,
+            AnimationSegment.segment_number == segment_number
+        )
+        segment_result = await db.execute(segment_query)
+        segment = segment_result.scalar_one_or_none()
+        
+        if not segment:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Animation video is not ready yet"
+                detail=f"Segment {segment_number} not found"
             )
         
-        # Получаем размер файла из GCS
-        try:
-            content_length = await get_file_size_from_gcs(project.final_video_url)
-        except Exception as e:
+        # Проверяем статус сегмента
+        if segment.status == AnimationStatus.COMPLETED:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Unable to retrieve animation video info: {e}"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Segment already completed. Delete and recreate if you want to regenerate."
             )
         
-        return Response(
-            content="",
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(content_length),
-                "Content-Type": "video/mp4",
-                "Cache-Control": "public, max-age=3600",
-                "X-Video-Duration": "unknown",  # Можно добавить реальную продолжительность если нужно
-                "X-Video-Status": "ready"
+        if segment.status == AnimationStatus.IN_PROGRESS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Segment generation already in progress"
+            )
+        
+        # Обновляем (или задаём) индивидуальный промпт сегмента – обязателен
+            segment.segment_prompt = generate_data.segment_prompt
+            await db.commit()
+        
+        # Убеждаемся, что промпт сохранён
+        if not segment.segment_prompt:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Segment prompt is required to start generation"
+            )
+        
+        # Запускаем генерацию сегмента
+        from tasks.generation_tasks import generate_segment_task
+        task = generate_segment_task.delay(str(project_id), segment_number)
+        
+        # Обновляем статус сегмента на IN_PROGRESS
+        segment.status = AnimationStatus.IN_PROGRESS
+        await db.commit()
+        await db.refresh(segment)
+        
+        logger.info(f"Started generation for segment {segment_number} in project {project_id}")
+        logger.info(f"Task ID: {task.id}")
+        logger.info(f"Using prompt: {segment.segment_prompt}")
+        
+        return {
+            "message": "Segment generation started successfully! 🚀",
+            "project_id": str(project_id),
+            "segment_number": segment_number,
+            "task_id": task.id,
+            "status": "in_progress",
+            "prompt_used": segment.segment_prompt,
+            "estimated_time": "3-5 minutes",
+            "current_time": "UTC now",
+            "monitoring": {
+                "status_endpoint": f"/api/v1/animations/{project_id}/segments/{segment_number}",
+                "video_endpoint": f"/api/v1/animations/{project_id}/segments/{segment_number}/video",
+                "poll_interval_seconds": 10
+            },
+            "details": {
+                "generator": "Google Veo 2.0",
+                "duration": "5 seconds",
+                "quality": "1280x720",
+                "user_control": True
             }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error starting segment generation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to start segment generation"
+        )
+
+
+@router.get("/{project_id}/segments/{segment_number}")
+async def get_segment_details(
+    project_id: UUID,
+    segment_number: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    📊 ПОЛЬЗОВАТЕЛЬСКИЙ КОНТРОЛЬ: Получает детальную информацию о конкретном сегменте.
+    """
+    try:
+        # Проверяем, что проект принадлежит пользователю
+        project_query = select(AnimationProject).where(
+            AnimationProject.id == project_id,
+            AnimationProject.user_id == current_user.id
+        )
+        project_result = await db.execute(project_query)
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Animation project not found"
+            )
+        
+        # Находим сегмент
+        segment_query = select(AnimationSegment).where(
+            AnimationSegment.animation_project_id == project_id,
+            AnimationSegment.segment_number == segment_number
+        )
+        segment_result = await db.execute(segment_query)
+        segment = segment_result.scalar_one_or_none()
+        
+        if not segment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Segment {segment_number} not found"
+            )
+        
+        # Определяем используемый промпт: для каждого сегмента промпт обязателен
+        active_prompt = segment.segment_prompt
+        prompt_source = "custom"
+        
+        # Статистика и детали
+        status_details = {
+            "pending": "⏳ Segment ready for generation",
+            "in_progress": "🔄 Video is being generated with Veo 2.0",
+            "completed": "✅ Video generated successfully",
+            "failed": "❌ Generation failed"
+        }
+        
+        return {
+            "id": str(segment.id),
+            "segment_number": segment.segment_number,
+            "status": segment.status.value,
+            "status_description": status_details.get(segment.status.value, "Unknown status"),
+            "prompts": {
+                "active_prompt": active_prompt,
+                "prompt_source": prompt_source,
+                "segment_prompt": segment.segment_prompt
+            },
+            "generation": {
+                "generator": "Google Veo 2.0",
+                "duration": "5 seconds",
+                "quality": "1280x720",
+                "estimated_time": "3-5 minutes" if segment.status.value == "in_progress" else None
+            },
+            "urls": {
+                "start_frame_url": segment.start_frame_url,
+                "generated_video_url": segment.generated_video_url,
+                "video_endpoint": f"/api/v1/animations/{project_id}/segments/{segment_number}/video" if segment.generated_video_url else None,
+                "download_endpoint": f"/api/v1/animations/{project_id}/segments/{segment_number}/video" if segment.generated_video_url else None
+            },
+            "actions": {
+                "can_regenerate": segment.status.value in ["completed", "failed"],
+                "can_update_prompt": True,
+                "generate_endpoint": f"/api/v1/animations/{project_id}/segments/{segment_number}/generate",
+                "batch_prompt_endpoint": f"/api/v1/animations/{project_id}/segments/prompts"
+            },
+            "timestamps": {
+                "created_at": segment.created_at.isoformat() if segment.created_at else None,
+                "updated_at": segment.updated_at.isoformat() if segment.updated_at else None
+            },
+            "user_control": {
+                "enabled": True,
+                "description": "You control when this segment generates"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting segment details: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get segment details"
+        )
+
+
+# ==================== BATCH OPERATIONS FOR PARALLEL GENERATION ====================
+
+@router.put("/{project_id}/segments/prompts")
+async def update_all_segment_prompts(
+    project_id: UUID,
+    prompts_data: BatchSegmentPromptsUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    🎯 BATCH OPERATION: Обновляет промпты для всех сегментов сразу.
+    Позволяет пользователю задать индивидуальные промпты для каждого сегмента.
+    """
+    try:
+        # Проверяем, что проект принадлежит пользователю
+        project_query = select(AnimationProject).where(
+            AnimationProject.id == project_id,
+            AnimationProject.user_id == current_user.id
+        )
+        project_result = await db.execute(project_query)
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Animation project not found"
+            )
+        
+        # Получаем все сегменты проекта
+        segments_query = select(AnimationSegment).where(
+            AnimationSegment.animation_project_id == project_id
+        )
+        segments_result = await db.execute(segments_query)
+        existing_segments = {seg.segment_number: seg for seg in segments_result.scalars().all()}
+        
+        updated_segments = []
+        
+        # Обновляем промпты для каждого сегмента
+        for prompt_data in prompts_data.prompts:
+            segment_number = prompt_data.segment_number
+            
+            if segment_number not in existing_segments:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Segment {segment_number} not found"
+                )
+            
+            segment = existing_segments[segment_number]
+            
+            # Проверяем, что сегмент не в процессе генерации
+            if segment.status == AnimationStatus.IN_PROGRESS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot update prompt for segment {segment_number} - generation in progress"
+                )
+            
+            # Обновляем промпт
+            segment.segment_prompt = prompt_data.segment_prompt
+            updated_segments.append({
+                "segment_number": segment_number,
+                "prompt": prompt_data.segment_prompt,
+                "status": segment.status.value
+            })
+        
+        await db.commit()
+        
+        logger.info(f"Updated prompts for {len(updated_segments)} segments in project {project_id}")
+        
+        return {
+            "message": f"Successfully updated prompts for {len(updated_segments)} segments",
+            "project_id": str(project_id),
+            "updated_segments": updated_segments,
+            "next_step": "Use /generate-all endpoint to start parallel generation"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error updating segment prompts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update segment prompts"
+        )
+
+
+@router.post("/{project_id}/segments/generate-all", response_model=BatchGenerationResponse)
+async def generate_all_segments_parallel(
+    project_id: UUID,
+    generate_data: GenerateAllSegmentsRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+) -> BatchGenerationResponse:
+    """
+    🚀 PARALLEL GENERATION: Запускает генерацию ВСЕХ сегментов одновременно!
+    Все сегменты генерируются параллельно, независимо друг от друга.
+    """
+    try:
+        # Проверяем, что проект принадлежит пользователю
+        project_query = select(AnimationProject).where(
+            AnimationProject.id == project_id,
+            AnimationProject.user_id == current_user.id
+        )
+        project_result = await db.execute(project_query)
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Animation project not found"
+            )
+        
+        # Получаем все сегменты проекта
+        segments_query = select(AnimationSegment).where(
+            AnimationSegment.animation_project_id == project_id
+        ).order_by(AnimationSegment.segment_number)
+        segments_result = await db.execute(segments_query)
+        segments = segments_result.scalars().all()
+        
+        if not segments:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No segments found for this project"
+            )
+        
+        # Проверяем, что у всех сегментов есть промпты
+        segments_without_prompts = [
+            seg.segment_number for seg in segments 
+            if not seg.segment_prompt or seg.segment_prompt.strip() == ""
+        ]
+        
+        if segments_without_prompts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Segments {segments_without_prompts} don't have prompts. Set prompts first using /segments/prompts endpoint."
+            )
+        
+        # Определяем какие сегменты нужно генерировать
+        segments_to_generate = []
+        
+        for segment in segments:
+            if segment.status == AnimationStatus.PENDING:
+                segments_to_generate.append(segment)
+            elif segment.status == AnimationStatus.FAILED:
+                segments_to_generate.append(segment)
+            elif segment.status == AnimationStatus.COMPLETED and generate_data.force_regenerate:
+                segments_to_generate.append(segment)
+            elif segment.status == AnimationStatus.IN_PROGRESS:
+                # Пропускаем сегменты, которые уже генерируются
+                continue
+        
+        if not segments_to_generate:
+            completed_count = len([s for s in segments if s.status == AnimationStatus.COMPLETED])
+            in_progress_count = len([s for s in segments if s.status == AnimationStatus.IN_PROGRESS])
+            
+            if completed_count == len(segments):
+                message = "All segments are already completed. Use force_regenerate=true to regenerate."
+            elif in_progress_count > 0:
+                message = f"{in_progress_count} segments are already generating. Wait for completion or use individual endpoints."
+            else:
+                message = "No segments available for generation."
+                
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=message
+            )
+        
+        # Запускаем параллельную генерацию всех сегментов
+        task_ids = []
+        
+        from tasks.generation_tasks import generate_segment_task
+        
+        for segment in segments_to_generate:
+            # Обновляем статус на IN_PROGRESS
+            segment.status = AnimationStatus.IN_PROGRESS
+            segment.progress = 0
+            
+            # Запускаем задачу генерации
+            task = generate_segment_task.delay(str(project_id), segment.segment_number)
+            task_ids.append(task.id)
+            
+            logger.info(f"Started parallel generation for segment {segment.segment_number}, task: {task.id}")
+        
+        await db.commit()
+        
+        logger.info(f"Started parallel generation for {len(segments_to_generate)} segments in project {project_id}")
+        
+        return BatchGenerationResponse(
+            message=f"🚀 Started parallel generation for {len(segments_to_generate)} segments!",
+            project_id=project_id,
+            total_segments=len(segments),
+            segments_started=len(segments_to_generate),
+            task_ids=task_ids,
+            estimated_completion_time="3-5 minutes per segment (all running in parallel)",
+            status="generating"
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting animation video info {project_id}: {e}")
+        await db.rollback()
+        logger.error(f"Error starting parallel generation: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get animation video info"
+            detail="Failed to start parallel generation"
         )
 
 
-# Download info endpoint removed as redundant
+# Deprecated / auxiliary endpoints removed to keep API surface minimal.

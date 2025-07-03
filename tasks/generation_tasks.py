@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+"""
+Задачи для генерации видео анимации
+"""
 import asyncio
 import tempfile
 import os
@@ -51,61 +55,51 @@ CeleryAsyncSession = sessionmaker(
 )
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(name="tasks.generation_tasks.generate_segment_task", bind=True, max_retries=3)
 def generate_segment_task(self, project_id: str, segment_number: int):
     """
-    Celery задача для генерации одного видео-сегмента.
+    ИСПРАВЛЕННАЯ Celery задача для генерации сегмента видео.
+    Использует правильное управление event loop для Celery.
     
     Args:
         project_id: UUID проекта анимации
         segment_number: Номер сегмента для генерации
+        
+    Returns:
+        dict: Результат генерации
     """
     try:
-        # Создаем новый event loop для каждой задачи
+        logger.info(f"🎬 Starting segment generation task: project {project_id}, segment {segment_number}")
+        
+        # Правильное управление event loop в Celery
         try:
+            # Пытаемся получить текущий event loop
             loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop = None
+            if loop.is_closed():
+                # Если loop закрыт, создаем новый
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
         except RuntimeError:
-            loop = None
-            
-        if loop is None:
+            # Если нет event loop, создаем новый
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         
-        try:
-            result = loop.run_until_complete(
-                _generate_segment_async(UUID(project_id), segment_number)
-            )
-            return result
-        finally:
-            if loop:
-                try:
-                    loop.close()
-                except:
-                    pass
-            
-    except Exception as exc:
-        logger.error(f"Error in generate_segment_task: {exc}")
+        # Запускаем асинхронную функцию в правильном контексте
+        result = loop.run_until_complete(_generate_segment_async(UUID(project_id), segment_number))
         
-        # Обновляем статус сегмента на failed
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(
-                    _update_segment_status(UUID(project_id), segment_number, AnimationStatus.FAILED)
-                )
-            finally:
-                loop.close()
-        except:
-            pass
+        logger.info(f"✅ Segment generation completed: {result}")
+        return result
         
-        # Retry логика
+    except Exception as e:
+        logger.error(f"❌ Error in generate_segment_task: {e}")
+        
+        # Retry logic
         if self.request.retries < self.max_retries:
-            raise self.retry(countdown=60 * (self.request.retries + 1))
-        
-        raise exc
+            logger.info(f"🔄 Retrying... attempt {self.request.retries + 1}/{self.max_retries}")
+            raise self.retry(countdown=60 * (self.request.retries + 1))  # Увеличиваем интервал
+        else:
+            logger.error(f"❌ Max retries reached for project {project_id}, segment {segment_number}")
+            raise
 
 
 async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict:
@@ -135,39 +129,43 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
             
             # 3. Обновляем статус на IN_PROGRESS
             segment.status = AnimationStatus.IN_PROGRESS
+            segment.progress = 10
             await session.commit()
             
             logger.info(f"Starting generation for project {project_id}, segment {segment_number}")
             
             # 4. Определяем исходное изображение
-            start_frame_url = await _get_start_frame_url(session, project, segment_number)
+            start_frame_url = await _get_start_frame_url(session, project, segment, segment_number)
             
-            # 5. Генерируем видео используя Veo 2.0 (БЕЗ FALLBACK!)
+            # 5. Определяем промпт для генерации - промпт ОБЯЗАТЕЛЕН для каждого сегмента
+            if not segment.segment_prompt:
+                raise ValueError("Segment prompt is required before generation")
+            generation_prompt = segment.segment_prompt
+            logger.info(f"🎯 Using prompt for segment {segment_number}: '{generation_prompt[:50]}...'")
+            
+            # 6. Генерируем видео используя Veo 2.0 (БЕЗ FALLBACK!)
             logger.info("Generating video with Veo 2.0 - NO FALLBACKS!")
             generated_video_url = await generate_video_from_image_v2(
                 start_frame_url=start_frame_url,
-                animation_prompt=project.animation_prompt,
+                animation_prompt=generation_prompt,  # ИСПОЛЬЗУЕМ ИНДИВИДУАЛЬНЫЙ ПРОМПТ!
                 duration_seconds=5  # Veo 2.0 поддерживает только 5, 6, 7, 8 секунд
             )
             
-            # 6. Обновляем сегмент с результатом
+            # 7. Обновляем сегмент с результатом
             segment.generated_video_url = generated_video_url
             segment.status = AnimationStatus.COMPLETED
+            segment.progress = 90
             await session.commit()
             
-            logger.info(f"Completed generation for segment {segment_number}: {generated_video_url}")
+            logger.info(f"✅ Completed generation for segment {segment_number}: {generated_video_url}")
+            logger.info(f"🎬 Used prompt: '{generation_prompt}'")
             
-            # 7. Проверяем, не последний ли это сегмент
-            if segment_number < project.total_segments:
-                # Запускаем генерацию следующего сегмента
-                from tasks.generation_tasks import generate_segment_task
-                generate_segment_task.delay(str(project_id), segment_number + 1)
-                logger.info(f"Queued generation for next segment: {segment_number + 1}")
-            else:
-                # Все сегменты готовы, запускаем проверку и сборку
-                logger.info(f"All segments completed for project {project_id}")
-                from tasks.assembly_tasks import check_segments_completion_task
-                check_segments_completion_task.delay(str(project_id))
+            # 8. НЕ ЗАПУСКАЕМ АВТОМАТИЧЕСКИ СЛЕДУЮЩИЙ СЕГМЕНТ!
+            # Пользователь сам решает когда генерировать каждый сегмент!
+            logger.info(f"🎯 Segment {segment_number} completed. User controls next steps!")
+            
+            segment.progress = 100
+            await session.commit()
             
             return {
                 "status": "completed",
@@ -180,57 +178,48 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
             raise
 
 
-async def _get_start_frame_url(session: AsyncSession, project: AnimationProject, segment_number: int) -> str:
+async def _get_start_frame_url(session: AsyncSession, project: AnimationProject, segment: AnimationSegment, segment_number: int) -> str:
     """
     Определяет URL исходного кадра для генерации сегмента.
-    """
-    if segment_number == 1:
-        # Для первого сегмента используем исходный аватар
-        avatar_query = select(Avatar).where(Avatar.id == project.source_avatar_id)
-        avatar_result = await session.execute(avatar_query)
-        avatar = avatar_result.scalar_one_or_none()
-        
-        if not avatar:
-            raise ValueError(f"Source avatar {project.source_avatar_id} not found")
-        
-        # Для первого сегмента нужно создать временный файл изображения из бинарных данных
-        if avatar.image_data:
-            # Создаем временный файл из binary data аватара
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_avatar:
-                temp_avatar.write(avatar.image_data)
-                temp_avatar_path = temp_avatar.name
-            
-            # Загружаем аватар в GCS для доступа через URL
-            avatar_url = await upload_file_to_gcs(
-                temp_avatar_path,
-                f"avatars/{avatar.id}.jpg"
-            )
-            
-            # Удаляем временный файл
-            os.unlink(temp_avatar_path)
-            
-            return avatar_url
-        else:
-            raise ValueError(f"Avatar {avatar.id} has no image data")
     
-    else:
-        # Для последующих сегментов извлекаем последний кадр из предыдущего видео
-        prev_segment_query = select(AnimationSegment).where(
-            AnimationSegment.animation_project_id == project.id,
-            AnimationSegment.segment_number == segment_number - 1
+    ДЛЯ ПАРАЛЛЕЛЬНОЙ ГЕНЕРАЦИИ: Все сегменты используют исходный аватар как стартовый кадр.
+    Это позволяет генерировать все сегменты независимо и параллельно.
+    """
+    # Получаем исходный аватар (для всех сегментов)
+    avatar_query = select(Avatar).where(Avatar.id == project.source_avatar_id)
+    avatar_result = await session.execute(avatar_query)
+    avatar = avatar_result.scalar_one_or_none()
+    
+    if not avatar:
+        raise ValueError(f"Source avatar {project.source_avatar_id} not found")
+    
+    # Создаем временный файл изображения из бинарных данных
+    if avatar.image_data:
+        # Создаем временный файл из binary data аватара
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_avatar:
+            temp_avatar.write(avatar.image_data)
+            temp_avatar_path = temp_avatar.name
+        
+        # Загружаем аватар в GCS для доступа через URL
+        avatar_url = await upload_file_to_gcs(
+            temp_avatar_path,
+            f"avatars/{avatar.id}_segment_{segment_number}.jpg"  # Уникальное имя для каждого сегмента
         )
-        prev_segment_result = await session.execute(prev_segment_query)
-        prev_segment = prev_segment_result.scalar_one_or_none()
         
-        if not prev_segment or not prev_segment.generated_video_url:
-            raise ValueError(f"Previous segment {segment_number - 1} not ready")
+        # Удаляем временный файл
+        os.unlink(temp_avatar_path)
         
-        # Извлекаем последний кадр из предыдущего видео
-        last_frame_url = await _extract_last_frame_from_video(prev_segment.generated_video_url)
-        return last_frame_url
+        # Обновляем прогресс текущего сегмента
+        segment.progress = 30
+        await session.commit()
+        
+        logger.info(f"🎯 Segment {segment_number}: Using avatar as start frame for parallel generation")
+        return avatar_url
+    else:
+        raise ValueError(f"Avatar {avatar.id} has no image data")
 
 
-async def _extract_last_frame_from_video(video_url: str) -> str:
+async def _extract_last_frame_from_video(session: AsyncSession, segment: AnimationSegment, video_url: str) -> str:
     """
     Извлекает последний кадр из видео и возвращает URL на него.
     """
@@ -248,6 +237,10 @@ async def _extract_last_frame_from_video(video_url: str) -> str:
                 temp_frame.name,
                 f"animations/frames/{os.path.basename(temp_frame.name)}"
             )
+            
+            # Обновляем прогресс после получения кадра
+            segment.progress = 90
+            await session.commit()
             
             return frame_url
 
@@ -277,17 +270,9 @@ def create_animation_segments_task(self, project_id: str):
     Задача для создания записей сегментов в БД после создания проекта.
     """
     try:
-        # Создаем новый event loop
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop = None
-        except RuntimeError:
-            loop = None
-            
-        if loop is None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Создаем новый event loop для Celery
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
         try:
             result = loop.run_until_complete(
@@ -295,11 +280,7 @@ def create_animation_segments_task(self, project_id: str):
             )
             return result
         finally:
-            if loop:
-                try:
-                    loop.close()
-                except:
-                    pass
+            loop.close()
             
     except Exception as exc:
         logger.error(f"Error creating segments: {exc}")
@@ -329,33 +310,29 @@ async def _create_segments_async(project_id: UUID) -> dict:
             
             if len(existing_segments) > 0:
                 logger.info(f"Segments already exist for project {project_id}, skipping creation")
-                # Запускаем генерацию первого сегмента если он в статусе pending
-                first_segment = [s for s in existing_segments if s.segment_number == 1]
-                if first_segment and first_segment[0].status == AnimationStatus.PENDING:
-                    generate_segment_task.delay(str(project_id), 1)
-                    logger.info(f"Restarted generation for segment 1 of project {project_id}")
                 return {"status": "segments_already_exist", "total_segments": len(existing_segments)}
             
-            # Создаем записи для всех сегментов
+            # Создаем записи для всех сегментов - БЕЗ АВТОЗАПУСКА!
             for i in range(1, project.total_segments + 1):
                 segment = AnimationSegment(
                     animation_project_id=project_id,
                     segment_number=i,
                     status=AnimationStatus.PENDING,
-                    start_frame_url=""  # Будет заполнено при генерации
+                    start_frame_url="",  # Будет заполнено при генерации
+                    segment_prompt=None  # Пользователь может задать индивидуальный промпт
                 )
                 session.add(segment)
             
             await session.commit()
             
-            # Запускаем генерацию первого сегмента
-            generate_segment_task.delay(str(project_id), 1)
-            
-            logger.info(f"Created {project.total_segments} segments for project {project_id}")
+            # НЕ ЗАПУСКАЕМ АВТОМАТИЧЕСКИ! Пользователь сам контролирует каждый сегмент!
+            logger.info(f"🎯 Created {project.total_segments} segments for project {project_id}")
+            logger.info(f"🎮 User can now control each segment individually!")
             
             return {
                 "status": "segments_created", 
-                "total_segments": project.total_segments
+                "total_segments": project.total_segments,
+                "message": "Segments created. User can now generate each segment individually."
             }
             
         except Exception as e:

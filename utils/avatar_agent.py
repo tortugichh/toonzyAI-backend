@@ -9,6 +9,7 @@ from utils.model_manager import generate_image
 from utils.gcs_client import upload_image_to_gcs
 from db.avatar_repository import insert_avatar
 from uuid import UUID
+from db.avatar_repository import update_avatar_progress
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +80,24 @@ async def generate_avatar(request: AvatarCreateRequest, user_id: UUID) -> Avatar
     logger.info(f"Starting avatar generation for user {user_id}, avatar {avatar_id}")
     
     try:
+        # Обновляем прогресс: 10%
+        await update_avatar_progress(avatar_id, 10)
+        
         # Генерируем изображение
         logger.info(f"Generating image with prompt: {request.prompt}")
         image_bytes, _ = generate_image(request.prompt)
         logger.info(f"Image generated successfully, size: {len(image_bytes)} bytes")
         
+        # Обновляем прогресс: 50%
+        await update_avatar_progress(avatar_id, 50)
+        
         # Загружаем изображение в GCS
         logger.info(f"Uploading image to GCS...")
         image_url = upload_image_to_gcs(image_bytes, f"avatars/{avatar_id}.png")
         logger.info(f"Image uploaded to GCS: {image_url}")
+        
+        # Обновляем прогресс: 80%
+        await update_avatar_progress(avatar_id, 80)
         
         # Сохраняем в БД
         logger.info(f"Saving avatar to database...")
@@ -100,6 +110,9 @@ async def generate_avatar(request: AvatarCreateRequest, user_id: UUID) -> Avatar
             moderation_flags=None
         )
         logger.info(f"Avatar saved to database with ID: {saved_avatar_id}")
+        
+        # Финальный прогресс
+        await update_avatar_progress(avatar_id, 100)
         
         # Проверяем, что ID совпадают
         if saved_avatar_id != avatar_id:

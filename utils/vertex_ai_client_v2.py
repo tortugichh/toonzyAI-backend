@@ -9,6 +9,7 @@ import time
 import asyncio
 import requests
 import logging
+import tempfile
 
 from google.auth import default
 from google.auth.transport.requests import Request
@@ -64,8 +65,12 @@ async def generate_video_from_image_v2(
                     raise FileNotFoundError(f"Local file not found: {temp_image_path}")
                 with open(temp_image_path, 'rb') as f:
                     image_bytes = f.read()
+            elif start_frame_url.startswith('gs://'):
+                # GCS файл - используем GCS клиент
+                from utils.gcs_client import download_file_from_gcs_authenticated
+                image_bytes = await download_file_from_gcs_authenticated(start_frame_url)
             else:
-                # Скачиваем изображение по URL
+                # Скачиваем изображение по HTTP URL
                 response = requests.get(start_frame_url)
                 response.raise_for_status()
                 image_bytes = response.content
@@ -247,9 +252,23 @@ async def _poll_veo2_operation(operation_name: str, model_id: str) -> str:
                     logger.error(f"❌ No video data found. Available fields: {list(video_info.keys())}")
                     raise Exception("No video data in response")
                 else:
-                    logger.error("❌ No videos array found in response")
-                    logger.error(f"Response structure: {list(response_data.keys())}")
-                    raise Exception("No videos in response")
+                    # Check if content was filtered by RAI
+                    if "raiMediaFilteredCount" in response_data or "raiMediaFilteredReasons" in response_data:
+                        filtered_count = response_data.get("raiMediaFilteredCount", 0)
+                        filtered_reasons = response_data.get("raiMediaFilteredReasons", [])
+                        
+                        logger.error("🚫 Content was filtered by Google's Responsible AI system")
+                        logger.error(f"📊 Filtered count: {filtered_count}")
+                        if filtered_reasons:
+                            logger.error(f"🔍 Filtered reasons: {filtered_reasons}")
+                        
+                        # Provide helpful error message
+                        reason_text = f" (Reasons: {', '.join(filtered_reasons)})" if filtered_reasons else ""
+                        raise Exception(f"Content was filtered by Google's AI safety system{reason_text}. Please try a different prompt that doesn't violate content policies.")
+                    else:
+                        logger.error("❌ No videos array found in response")
+                        logger.error(f"Response structure: {list(response_data.keys())}")
+                        raise Exception("No videos in response")
                     
             else:
                 # Операция еще не завершена
@@ -282,7 +301,7 @@ async def _save_video_to_gcs(video_bytes: bytes, mime_type: str) -> str:
     try:
         from google.cloud import storage
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
         # Инициализируем клиент GCS
         client = storage.Client()
@@ -306,9 +325,25 @@ async def _save_video_to_gcs(video_bytes: bytes, mime_type: str) -> str:
         blob = bucket.blob(filename)
         blob.upload_from_string(video_bytes, content_type=mime_type)
         
+        # Делаем видео публичным для прямого доступа
+        try:
+            blob.make_public()
+            logger.info(f"✅ Made video public: {filename}")
+            public_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{filename}"
+        except Exception as e:
+            logger.warning(f"⚠️ Could not make video public (uniform bucket-level access?): {e}")
+            # Генерируем signed URL как fallback
+            public_url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(days=7),
+                method="GET"
+            )
+            logger.info("📝 Generated signed URL for video (7 days)")
+        
         # Формируем GCS URI
         gcs_uri = f"gs://{GCS_BUCKET}/{filename}"
         logger.info(f"💾 Video saved to GCS: {gcs_uri} ({len(video_bytes)} bytes)")
+        logger.info(f"🔗 Accessible URL: {public_url[:120]}...")
         
         return gcs_uri
         

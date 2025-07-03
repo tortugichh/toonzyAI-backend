@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Response, Depends, Query
-from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse, AvatarListResponse
+from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse, AvatarListResponse, AvatarStatusResponse
 import logging
 from utils.avatar_agent import generate_avatar
 import os
@@ -196,3 +196,15 @@ async def delete_avatar(
         await db.rollback()
         logger.error(f"Error deleting avatar {avatar_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/avatars/{avatar_id}/status", response_model=AvatarStatusResponse)
+async def get_avatar_status(avatar_id: UUID, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)) -> AvatarStatusResponse:
+    """Возвращает статус и прогресс генерации аватара."""
+    avatar = await get_avatar_by_id(avatar_id)
+    if not avatar or avatar.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    return AvatarStatusResponse(
+        avatar_id=avatar.id,
+        status=avatar.status,
+        progress=avatar.progress
+    )

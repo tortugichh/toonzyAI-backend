@@ -64,6 +64,7 @@ class Avatar(Base):
     image_data = mapped_column(LargeBinary, nullable=True)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
     status = mapped_column(String, nullable=False)
+    progress = mapped_column(Integer, default=0, nullable=False)
     moderation_flags = mapped_column(Text, nullable=True)  # comma-separated
 
 class AnimationProject(Base):
@@ -94,6 +95,10 @@ class AnimationSegment(Base):
     
     segment_number = mapped_column(Integer, nullable=False)
     status = mapped_column(Enum(AnimationStatus), default=AnimationStatus.PENDING, nullable=False)
+    progress = mapped_column(Integer, default=0, nullable=False)
+    
+    # Индивидуальный промпт для каждого сегмента - ПОЛЬЗОВАТЕЛЬ КОНТРОЛИРУЕТ!
+    segment_prompt = mapped_column(Text, nullable=True)  # Промпт для этого конкретного сегмента
     
     start_frame_url = mapped_column(String, nullable=False)  # URL картинки-основы для генерации
     generated_video_url = mapped_column(String, nullable=True)  # URL сгенерированного видео-клипа
@@ -168,3 +173,25 @@ async def test_database_connection():
             return f"Database connection successful. Current time: {current_time}"
     except Exception as e:
         return f"Database connection failed: {e}"
+
+async def update_avatar_progress(avatar_id: UUID, progress: int):
+    """Обновляет поле progress аватара."""
+    try:
+        async with async_session() as session:
+            stmt = update(Avatar).where(Avatar.id == avatar_id).values(progress=progress)
+            await session.execute(stmt)
+            await session.commit()
+    except Exception as e:
+        print(f"Error updating avatar progress: {e}")
+        raise
+
+async def update_segment_progress(segment_id: UUID, progress: int):
+    """Обновляет progress у сегмента."""
+    try:
+        async with async_session() as session:
+            stmt = update(AnimationSegment).where(AnimationSegment.id == segment_id).values(progress=progress)
+            await session.execute(stmt)
+            await session.commit()
+    except Exception as e:
+        print(f"Error updating segment progress: {e}")
+        raise

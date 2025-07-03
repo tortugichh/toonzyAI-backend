@@ -2,16 +2,24 @@ from google.cloud import storage
 import os
 from typing import Union
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
 load_dotenv()
 
 GCS_BUCKET = os.getenv("GCS_BUCKET")
-GCS_PROJECT = os.getenv("GCS_PROJECT")
+GCS_PROJECT = os.getenv("GCS_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
 
 
 def upload_image_to_gcs(image_bytes: bytes, filename: str) -> str:
     """Upload image bytes to GCS and return public URL."""
     print("GCS_BUCKET inside upload_image_to_gcs:", GCS_BUCKET)
+    print("GCS_PROJECT inside upload_image_to_gcs:", GCS_PROJECT)
+    
+    if not GCS_BUCKET:
+        raise ValueError("GCS_BUCKET environment variable is not set")
+    if not GCS_PROJECT:
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
+    
     client = storage.Client(project=GCS_PROJECT)
     bucket = client.bucket(GCS_BUCKET)
     blob = bucket.blob(filename)
@@ -21,12 +29,19 @@ def upload_image_to_gcs(image_bytes: bytes, filename: str) -> str:
     try:
         blob.make_public()
         print(f"Successfully made blob {filename} public")
+        public_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{filename}"
     except Exception as e:
         print(f"Warning: Could not make blob {filename} public: {e}")
-        # Continue anyway, the URL might still work if bucket has public access
+        print("This is normal with uniform bucket-level access enabled")
+        # Use signed URL for access since public ACL is not available
+        public_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(days=7),  # 7 days expiration
+            method="GET"
+        )
+        print(f"Generated signed URL instead: {public_url[:100]}...")
     
-    public_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{filename}"
-    print(f"Generated public URL: {public_url}")
+    print(f"Final URL: {public_url[:100]}...")
     return public_url 
 
 
@@ -41,6 +56,11 @@ async def upload_file_to_gcs(file_path: str, destination_filename: str) -> str:
     Returns:
         GCS URL (gs://) format
     """
+    if not GCS_BUCKET:
+        raise ValueError("GCS_BUCKET environment variable is not set")
+    if not GCS_PROJECT:
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
+        
     client = storage.Client(project=GCS_PROJECT)
     bucket = client.bucket(GCS_BUCKET)
     blob = bucket.blob(destination_filename)
@@ -67,6 +87,9 @@ async def download_file_from_gcs(gcs_url: str, local_path: str) -> None:
         gcs_url: GCS URL in format gs://bucket/path or https://... 
         local_path: Local destination path
     """
+    if not GCS_PROJECT:
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
+        
     client = storage.Client(project=GCS_PROJECT)
     
     # Parse GCS URL
@@ -121,6 +144,8 @@ async def download_file_from_gcs_authenticated(gcs_url: str) -> bytes:
     
     def _download_sync(gcs_url: str) -> bytes:
         try:
+            if not GCS_PROJECT:
+                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
             client = storage.Client(project=GCS_PROJECT)
             
             # Parse GCS URL
@@ -167,6 +192,8 @@ async def get_file_size_from_gcs(gcs_url: str) -> int:
     
     def _get_size_sync(gcs_url: str) -> int:
         try:
+            if not GCS_PROJECT:
+                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
             client = storage.Client(project=GCS_PROJECT)
             
             # Parse GCS URL
@@ -191,4 +218,61 @@ async def get_file_size_from_gcs(gcs_url: str) -> int:
     
     # Run sync function in thread pool to avoid blocking
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _get_size_sync, gcs_url) 
+    return await loop.run_in_executor(None, _get_size_sync, gcs_url)
+
+
+def generate_signed_url(gcs_url: str, expiration_hours: int = 24) -> str:
+    """
+    Generate a signed URL for temporary access to a GCS file.
+    
+    Args:
+        gcs_url: GCS URL in gs:// format
+        expiration_hours: URL expiration time in hours (default: 24)
+        
+    Returns:
+        Signed URL for temporary access
+    """
+    try:
+        client = storage.Client(project=GCS_PROJECT)
+        
+        # Parse GCS URL
+        if gcs_url.startswith("gs://"):
+            parts = gcs_url[5:].split("/", 1)
+            bucket_name = parts[0]
+            blob_name = parts[1] if len(parts) > 1 else ""
+        else:
+            # Fallback for public URLs
+            bucket_name = GCS_BUCKET
+            blob_name = gcs_url.split("/")[-1]
+        
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        
+        # Generate signed URL with expiration
+        signed_url = blob.generate_signed_url(
+            expiration=datetime.utcnow() + timedelta(hours=expiration_hours),
+            method="GET",
+            version="v4"
+        )
+        
+        return signed_url
+        
+    except Exception as e:
+        raise Exception(f"Failed to generate signed URL: {e}")
+
+
+async def generate_signed_url_async(gcs_url: str, expiration_hours: int = 24) -> str:
+    """
+    Async wrapper for generate_signed_url.
+    
+    Args:
+        gcs_url: GCS URL in gs:// format
+        expiration_hours: URL expiration time in hours (default: 24)
+        
+    Returns:
+        Signed URL for temporary access
+    """
+    import asyncio
+    
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_signed_url, gcs_url, expiration_hours) 
