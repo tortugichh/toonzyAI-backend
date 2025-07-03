@@ -7,10 +7,10 @@ from utils.gcs_client import get_public_url
 
 
 class AnimationProjectCreate(BaseModel):
-    """Схема для создания проекта анимации."""
+    """Схема для создания проекта анимации. Общий промпт теперь опционален."""
     source_avatar_id: UUID = Field(..., description="ID исходного аватара для анимации")
     total_segments: int = Field(..., gt=0, le=10, description="Количество видео-сегментов (1-10)")
-    animation_prompt: str = Field(..., min_length=10, max_length=500, description="Общий промпт для анимации (может быть переопределен для каждого сегмента)")
+    animation_prompt: Optional[str] = Field(None, max_length=500, description="(Необязательно) Общий промпт для анимации")
 
 
 
@@ -33,6 +33,7 @@ class AnimationSegmentResponse(BaseModel):
     generated_video_url: Optional[str] = None
     # URL для просмотра видео сегмента через API
     video_url: Optional[str] = None
+    progress: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     
