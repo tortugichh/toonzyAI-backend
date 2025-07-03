@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from routers import avatar_routes, auth_routes, animation_routes
+from routers import avatar_routes, auth_routes, animation_routes, progress_ws
 from middleware.logging import LoggingMiddleware
 from contextlib import asynccontextmanager
 
@@ -30,6 +30,7 @@ app.add_middleware(
         "http://localhost:3000",  # React dev server
         "http://localhost:8000",  # FastAPI dev server
         "https://your-frontend-domain.com",  # Production frontend domain
+        "http://localhost:5173",  # Vite dev server
         # Add your actual frontend domains here
     ],
     allow_credentials=True,
@@ -57,6 +58,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(avatar_routes.router, prefix="/api/v1", tags=["avatars"])
 app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(animation_routes.router, prefix="/api/v1/animations", tags=["animations"])
+app.include_router(progress_ws.router, prefix="/api/ws", tags=["websocket"])
 
 @app.get("/health")
 async def health():
