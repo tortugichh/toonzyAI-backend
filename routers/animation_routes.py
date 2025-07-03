@@ -138,7 +138,7 @@ async def create_animation_project(
             status=animation_project.status,
             final_video_url=animation_project.final_video_url,
             video_url=f"/api/v1/animations/{animation_project.id}/video" if animation_project.final_video_url else None,
-            source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar.image_data else None,
+            source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
             created_at=animation_project.created_at,
             updated_at=animation_project.updated_at,
             segments=[]  # Сегменты будут созданы асинхронно
@@ -201,7 +201,7 @@ async def get_animation_project(
             status=project.status,
             final_video_url=project.final_video_url,
             video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
-            source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar and avatar.image_data else None,
+            source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
             created_at=project.created_at,
             updated_at=project.updated_at,
             segments=[
@@ -257,7 +257,7 @@ async def list_animation_projects(
                 total_segments=project.total_segments,
                 final_video_url=project.final_video_url,
                 video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
-                source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar and avatar.image_data else None,
+                source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
                 created_at=project.created_at
             )
             for project, avatar in projects_with_avatars
