@@ -75,8 +75,9 @@ class AnimationProject(Base):
     user_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     source_avatar_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("avatars.id"), nullable=False)
     
+    name = mapped_column(String(255), nullable=False)  # Название проекта
     total_segments = mapped_column(Integer, nullable=False)
-    animation_prompt = mapped_column(Text, nullable=False)
+    animation_prompt = mapped_column(Text, nullable=True)  # Сделаем опциональным
     status = mapped_column(Enum(AnimationStatus), default=AnimationStatus.PENDING, nullable=False)
     final_video_url = mapped_column(String, nullable=True)
     
@@ -85,6 +86,7 @@ class AnimationProject(Base):
     
     # Relationships
     segments = relationship("AnimationSegment", back_populates="project", cascade="all, delete-orphan")
+    avatar = relationship("Avatar")  # Добавим связь с аватаром
 
 class AnimationSegment(Base):
     """Отдельный видео-сегмент в анимационном проекте."""

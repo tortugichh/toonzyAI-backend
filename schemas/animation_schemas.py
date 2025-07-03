@@ -8,6 +8,7 @@ from utils.gcs_client import get_public_url
 
 class AnimationProjectCreate(BaseModel):
     """Схема для создания проекта анимации. Общий промпт теперь опционален."""
+    name: str = Field(..., min_length=1, max_length=255, description="Название проекта")
     source_avatar_id: UUID = Field(..., description="ID исходного аватара для анимации")
     total_segments: int = Field(..., gt=0, le=10, description="Количество видео-сегментов (1-10)")
     animation_prompt: Optional[str] = Field(None, max_length=500, description="(Необязательно) Общий промпт для анимации")
@@ -53,17 +54,20 @@ class AnimationProjectResponse(BaseModel):
     id: UUID
     user_id: UUID
     source_avatar_id: UUID
+    name: str  # Название проекта
     total_segments: int
-    animation_prompt: str  # Общий промпт проекта
+    animation_prompt: Optional[str] = None  # Общий промпт проекта - теперь опциональный
     status: AnimationStatus
     final_video_url: Optional[str] = None
     # URL для просмотра финального видео через API
     video_url: Optional[str] = None
+    # URL аватара для отображения на карточке проекта  
+    source_avatar_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     segments: List[AnimationSegmentResponse] = []
     
-    @field_validator('final_video_url', 'video_url', mode='before')
+    @field_validator('final_video_url', 'video_url', 'source_avatar_url', mode='before')
     @classmethod
     def convert_gcs_urls(cls, v):
         """Конвертирует gs:// URLs в публичные HTTPS URLs для браузера."""
@@ -78,15 +82,18 @@ class AnimationProjectListResponse(BaseModel):
     
     id: UUID
     source_avatar_id: UUID
-    animation_prompt: str
+    name: str  # Название проекта
+    animation_prompt: Optional[str] = None  # Общий промпт - теперь опциональный
     status: AnimationStatus
     total_segments: int
     final_video_url: Optional[str] = None
     # URL для просмотра финального видео через API
     video_url: Optional[str] = None
+    # URL аватара для отображения на карточке проекта
+    source_avatar_url: Optional[str] = None
     created_at: datetime
     
-    @field_validator('final_video_url', 'video_url', mode='before')
+    @field_validator('final_video_url', 'video_url', 'source_avatar_url', mode='before')
     @classmethod
     def convert_gcs_urls(cls, v):
         """Конвертирует gs:// URLs в публичные HTTPS URLs для браузера."""

@@ -111,8 +111,9 @@ async def create_animation_project(
         animation_project = AnimationProject(
             user_id=current_user.id,
             source_avatar_id=project_data.source_avatar_id,
+            name=project_data.name,
             total_segments=project_data.total_segments,
-            animation_prompt=(project_data.animation_prompt or ""),
+            animation_prompt=project_data.animation_prompt,
             status=AnimationStatus.PENDING
         )
         
@@ -131,11 +132,13 @@ async def create_animation_project(
             id=animation_project.id,
             user_id=animation_project.user_id,
             source_avatar_id=animation_project.source_avatar_id,
+            name=animation_project.name,
             total_segments=animation_project.total_segments,
             animation_prompt=animation_project.animation_prompt,
             status=animation_project.status,
             final_video_url=animation_project.final_video_url,
             video_url=f"/api/v1/animations/{animation_project.id}/video" if animation_project.final_video_url else None,
+            source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar.image_data else None,
             created_at=animation_project.created_at,
             updated_at=animation_project.updated_at,
             segments=[]  # Сегменты будут созданы асинхронно
@@ -176,6 +179,11 @@ async def get_animation_project(
                 detail="Animation project not found"
             )
         
+        # Получаем аватар для source_avatar_url
+        avatar_query = select(Avatar).where(Avatar.id == project.source_avatar_id)
+        avatar_result = await db.execute(avatar_query)
+        avatar = avatar_result.scalar_one_or_none()
+        
         # Получаем сегменты
         segments_query = select(AnimationSegment).where(
             AnimationSegment.animation_project_id == project_id
@@ -187,11 +195,13 @@ async def get_animation_project(
             id=project.id,
             user_id=project.user_id,
             source_avatar_id=project.source_avatar_id,
+            name=project.name,
             total_segments=project.total_segments,
             animation_prompt=project.animation_prompt,
             status=project.status,
             final_video_url=project.final_video_url,
             video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
+            source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar and avatar.image_data else None,
             created_at=project.created_at,
             updated_at=project.updated_at,
             segments=[
@@ -229,25 +239,28 @@ async def list_animation_projects(
     Получает список всех проектов анимации пользователя.
     """
     try:
-        projects_query = select(AnimationProject).where(
+        projects_query = select(AnimationProject, Avatar).where(
             AnimationProject.user_id == current_user.id
+        ).outerjoin(Avatar, AnimationProject.source_avatar_id == Avatar.id
         ).order_by(AnimationProject.created_at.desc())
         
         projects_result = await db.execute(projects_query)
-        projects = projects_result.scalars().all()
+        projects_with_avatars = projects_result.all()
         
         return [
             AnimationProjectListResponse(
                 id=project.id,
                 source_avatar_id=project.source_avatar_id,
+                name=project.name,
                 animation_prompt=project.animation_prompt,
                 status=project.status,
                 total_segments=project.total_segments,
                 final_video_url=project.final_video_url,
                 video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
+                source_avatar_url=get_public_url(f"gs://your-bucket/avatars/{avatar.id}.png") if avatar and avatar.image_data else None,
                 created_at=project.created_at
             )
-            for project in projects
+            for project, avatar in projects_with_avatars
         ]
         
     except Exception as e:
@@ -632,8 +645,8 @@ async def generate_specific_segment(
             )
         
         # Обновляем (или задаём) индивидуальный промпт сегмента – обязателен
-        segment.segment_prompt = generate_data.segment_prompt
-        await db.commit()
+            segment.segment_prompt = generate_data.segment_prompt
+            await db.commit()
         
         # Убеждаемся, что промпт сохранён
         if not segment.segment_prompt:
