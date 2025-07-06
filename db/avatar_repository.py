@@ -14,26 +14,21 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
-
-# Проверяем наличие DATABASE_URL
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
 
-# Используем асинхронный движок
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
-
-# ИСПРАВЛЕНИЕ: Используем async_sessionmaker вместо обычного sessionmaker
-async_session = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
+# Single async engine with tuned pool
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_size=20,
+    max_overflow=10,
+    future=True
 )
 
-async def get_db() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        yield session
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+async_session = AsyncSessionLocal
 
 Base = declarative_base()
 
@@ -197,3 +192,8 @@ async def update_segment_progress(segment_id: UUID, progress: int):
     except Exception as e:
         print(f"Error updating segment progress: {e}")
         raise
+
+async def get_db() -> AsyncSession:
+    """Dependency that provides a reusable async DB session."""
+    async with AsyncSessionLocal() as session:
+        yield session
