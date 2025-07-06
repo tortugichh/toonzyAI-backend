@@ -143,15 +143,24 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
             generation_prompt = segment.segment_prompt
             logger.info(f"🎯 Using prompt for segment {segment_number}: '{generation_prompt[:50]}...'")
             
-            # 6. Генерируем видео используя Veo 2.0 (БЕЗ FALLBACK!)
+            # 6. Дополнительный прогресс перед тяжёлой генерацией
+            segment.progress = 50  # Подготовка завершена, начинаем генерацию
+            await session.commit()
+            
+            # 7. Генерируем видео используя Veo 2.0 (БЕЗ FALLBACK!)
             logger.info("Generating video with Veo 2.0 - NO FALLBACKS!")
             generated_video_url = await generate_video_from_image_v2(
                 start_frame_url=start_frame_url,
                 animation_prompt=generation_prompt,  # ИСПОЛЬЗУЕМ ИНДИВИДУАЛЬНЫЙ ПРОМПТ!
-                duration_seconds=5  # Veo 2.0 поддерживает только 5, 6, 7, 8 секунд
+                duration_seconds=5,  # Veo 2.0 поддерживает только 5, 6, 7, 8 секунд
+                segment_id=str(segment.id)  # для Live progress
             )
             
-            # 7. Обновляем сегмент с результатом
+            # 8. Промежуточный прогресс – видео сгенерировано, идёт постобработка/загрузка
+            segment.progress = 80
+            await session.commit()
+            
+            # 9. Обновляем сегмент с результатом
             segment.generated_video_url = generated_video_url
             segment.status = AnimationStatus.COMPLETED
             segment.progress = 90
@@ -160,7 +169,7 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
             logger.info(f"✅ Completed generation for segment {segment_number}: {generated_video_url}")
             logger.info(f"🎬 Used prompt: '{generation_prompt}'")
             
-            # 8. НЕ ЗАПУСКАЕМ АВТОМАТИЧЕСКИ СЛЕДУЮЩИЙ СЕГМЕНТ!
+            # 10. НЕ ЗАПУСКАЕМ АВТОМАТИЧЕСКИ СЛЕДУЮЩИЙ СЕГМЕНТ!
             # Пользователь сам решает когда генерировать каждый сегмент!
             logger.info(f"🎯 Segment {segment_number} completed. User controls next steps!")
             

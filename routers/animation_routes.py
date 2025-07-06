@@ -208,11 +208,12 @@ async def get_animation_project(
                 {
                     "id": segment.id,
                     "segment_number": segment.segment_number,
+                    "segment_prompt": segment.segment_prompt,
                     "status": segment.status,
                     "progress": segment.progress,
                     "start_frame_url": segment.start_frame_url,
                     "generated_video_url": segment.generated_video_url,
-                    "video_url": f"/api/v1/animations/{project_id}/segments/{segment.segment_number}/video" if segment.generated_video_url else None,
+                    "video_url": f"/api/v1/animations/{project.id}/segments/{segment.segment_number}/video" if segment.generated_video_url else None,
                     "created_at": segment.created_at,
                     "updated_at": segment.updated_at
                 }
@@ -645,8 +646,8 @@ async def generate_specific_segment(
             )
         
         # Обновляем (или задаём) индивидуальный промпт сегмента – обязателен
-        segment.segment_prompt = generate_data.segment_prompt
-        await db.commit()
+            segment.segment_prompt = generate_data.segment_prompt
+            await db.commit()
         
         # Убеждаемся, что промпт сохранён
         if not segment.segment_prompt:
@@ -755,6 +756,7 @@ async def get_segment_details(
         return {
             "id": str(segment.id),
             "segment_number": segment.segment_number,
+            "segment_prompt": segment.segment_prompt,
             "status": segment.status,
             "progress": segment.progress,
             "status_description": status_details.get(segment.status.value, "Unknown status"),

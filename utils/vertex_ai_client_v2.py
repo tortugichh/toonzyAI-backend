@@ -37,7 +37,8 @@ VERTEX_AI_REGIONS = [
 async def generate_video_from_image_v2(
     start_frame_url: str,
     animation_prompt: str,
-    duration_seconds: int = 5
+    duration_seconds: int = 5,
+    segment_id: str | None = None
 ) -> str:
     """
     Генерирует видео используя Veo 2.0 с правильным REST API (согласно официальной документации).
@@ -136,7 +137,7 @@ async def generate_video_from_image_v2(
         logger.info(f"✅ Veo 2.0 operation started: {operation_name}")
         
         # 6. Polling для получения результата
-        video_gcs_uri = await _poll_veo2_operation(operation_name, model_id)
+        video_gcs_uri = await _poll_veo2_operation(operation_name, model_id, segment_id)
         
         logger.info(f"✅ Veo 2.0 video generated successfully: {video_gcs_uri}")
         return video_gcs_uri
@@ -159,7 +160,7 @@ async def generate_video_from_image_v2(
         logger.error(f"Veo 2.0 generation failed: {str(e)}")
         raise e
 
-async def _poll_veo2_operation(operation_name: str, model_id: str) -> str:
+async def _poll_veo2_operation(operation_name: str, model_id: str, segment_id: str | None = None) -> str:
     """
     Polling для получения результата long-running операции Veo 2.0 (согласно официальной документации).
     
@@ -271,8 +272,20 @@ async def _poll_veo2_operation(operation_name: str, model_id: str) -> str:
                         raise Exception("No videos in response")
                     
             else:
-                # Операция еще не завершена
-                logger.info(f"⏳ Operation still running, waiting {poll_interval} seconds...")
+                # Обновляем прогресс, если доступен progressPercent
+                progress_meta = operation_data.get("metadata", {})
+                percent = progress_meta.get("progressPercent")
+                if percent is not None and segment_id:
+                    # Обновляем в БД
+                    from db.avatar_repository import AsyncSessionLocal, AnimationSegment
+                    from sqlalchemy import update
+                    async with AsyncSessionLocal() as progress_db:
+                        await progress_db.execute(
+                            update(AnimationSegment).where(AnimationSegment.id == segment_id).values(progress=int(percent))
+                        )
+                        await progress_db.commit()
+
+                logger.info(f"⏳ Operation still running ({percent or '?'}%), waiting {poll_interval} seconds...")
                 await asyncio.sleep(poll_interval)
         
         except requests.HTTPError as e:

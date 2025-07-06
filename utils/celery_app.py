@@ -4,8 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Конфигурация Redis из переменных окружения
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Default to Docker service name `redis` so backend/celery containers can resolve it.
+# Developers running without Docker can still override via REDIS_URL env var.
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 # Создание экземпляра Celery
 celery_app = Celery(

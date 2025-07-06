@@ -104,11 +104,13 @@ async def ws_progress(websocket: WebSocket, entity_type: str, entity_id: str, db
             else:  # project
                 total = obj.total_segments
                 completed = len([s for s in obj.segments if s.status == AnimationStatus.COMPLETED]) if hasattr(obj, "segments") else 0
+                percent = int((completed / total) * 100) if total else 0
                 data = {
                     "id": str(obj.id),
                     "status": obj.status.value if isinstance(obj.status, AnimationStatus) else obj.status,
                     "completed": completed,
-                    "total": total
+                    "total": total,
+                    "progress": percent
                 }
                 done = obj.status in [AnimationStatus.COMPLETED, AnimationStatus.FAILED]
                 logger.info(f"Project {entity_id} progress: {completed}/{total} segments completed, status: {data['status']}")
@@ -119,6 +121,6 @@ async def ws_progress(websocket: WebSocket, entity_type: str, entity_id: str, db
                 await asyncio.sleep(1)
                 await websocket.close()
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for %s %s", entity_type, entity_id) 
