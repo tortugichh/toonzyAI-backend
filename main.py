@@ -15,6 +15,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# CORS origins из переменной окружения
+origins_env = os.getenv("CORS_ORIGINS", "")
+extra_origins = [o.strip() for o in origins_env.split(',') if o.strip()]
+
 app = FastAPI(
     title="ToonzyAI API",
     description="API for generating cartoon avatars using Vertex AI Imagen with JWT Authentication",
@@ -24,24 +28,26 @@ app = FastAPI(
 )
 
 # CORS middleware with security considerations
+default_origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://localhost:5173",
+]
+
+allow_origins = default_origins + extra_origins if extra_origins else default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:8000",  # FastAPI dev server
-        "https://your-frontend-domain.com",  # Production frontend domain
-        "http://localhost:5173",  # Vite dev server
-        # Add your actual frontend domains here
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[
         "Accept",
-        "Accept-Language", 
+        "Accept-Language",
         "Content-Language",
         "Content-Type",
         "Authorization",
-        "X-Requested-With"
+        "X-Requested-With",
     ],
 )
 
