@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, update
 import logging
+import re
 
 from utils.celery_app import celery_app
 from utils.vertex_ai_client_v2 import generate_video_from_image_v2  # Veo 2.0 с long-running operations
@@ -143,6 +144,17 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
             generation_prompt = segment.segment_prompt
             logger.info(f"🎯 Using prompt for segment {segment_number}: '{generation_prompt[:50]}...'")
             
+            # 🔤 Auto-translate non-English prompts (Cyrillic → English) for Veo
+            if re.search(r"[\u0400-\u04FF]", generation_prompt or ""):
+                try:
+                    from google.cloud import translate_v2 as translate  # Lightweight client
+                    translator = translate.Client()
+                    translated = translator.translate(generation_prompt, target_language="en")
+                    logger.info(f"Prompt translated for Veo: '{generation_prompt[:60]}...' -> '{translated['translatedText'][:60]}...'")
+                    generation_prompt = translated["translatedText"]
+                except Exception as te:
+                    logger.warning(f"Failed to translate segment prompt: {te}. Using original text.")
+            
             # 6. Дополнительный прогресс перед тяжёлой генерацией
             segment.progress = 50  # Подготовка завершена, начинаем генерацию
             await session.commit()
@@ -191,10 +203,33 @@ async def _get_start_frame_url(session: AsyncSession, project: AnimationProject,
     """
     Определяет URL исходного кадра для генерации сегмента.
     
-    ДЛЯ ПАРАЛЛЕЛЬНОЙ ГЕНЕРАЦИИ: Все сегменты используют исходный аватар как стартовый кадр.
-    Это позволяет генерировать все сегменты независимо и параллельно.
+    • Для первого сегмента используется исходный аватар проекта.
+    • Начиная со второго сегмента мы берём последний кадр ПРЕДЫДУЩЕГО сгенерированного сегмента.
+      Таким образом создаётся плавная нарративная цепочка (sequential generation).
     """
-    # Получаем исходный аватар (для всех сегментов)
+    # 1. Попытка: если это НЕ первый сегмент — попробуем вытащить кадр из предыдущего
+    if segment_number > 1:
+        prev_seg_query = select(AnimationSegment).where(
+            AnimationSegment.animation_project_id == project.id,
+            AnimationSegment.segment_number == segment_number - 1
+        )
+        prev_seg_res = await session.execute(prev_seg_query)
+        prev_seg = prev_seg_res.scalar_one_or_none()
+
+        if prev_seg and prev_seg.status == AnimationStatus.COMPLETED and prev_seg.generated_video_url:
+            try:
+                logger.info(f"📽️  Extracting last frame from previous segment {segment_number-1} for start frame…")
+                frame_url = await _extract_last_frame_from_video(session, segment, prev_seg.generated_video_url)
+                segment.start_frame_url = frame_url  # сохраняем для истории
+                segment.progress = 25
+                await session.commit()
+                logger.info(f"✅ Start frame for segment {segment_number} prepared from previous segment.")
+                return frame_url
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to use previous segment frame: {e}. Falling back to avatar image.")
+
+    # 2. Фолбэк: используем аватар
+    # Получаем исходный аватар
     avatar_query = select(Avatar).where(Avatar.id == project.source_avatar_id)
     avatar_result = await session.execute(avatar_query)
     avatar = avatar_result.scalar_one_or_none()
@@ -222,7 +257,7 @@ async def _get_start_frame_url(session: AsyncSession, project: AnimationProject,
         segment.progress = 30
         await session.commit()
         
-        logger.info(f"🎯 Segment {segment_number}: Using avatar as start frame for parallel generation")
+        logger.info(f"🎯 Segment {segment_number}: Using avatar as start frame")
         return avatar_url
     else:
         raise ValueError(f"Avatar {avatar.id} has no image data")
@@ -232,26 +267,47 @@ async def _extract_last_frame_from_video(session: AsyncSession, segment: Animati
     """
     Извлекает последний кадр из видео и возвращает URL на него.
     """
-    with tempfile.NamedTemporaryFile(suffix='.mp4') as temp_video:
-        with tempfile.NamedTemporaryFile(suffix='.jpg') as temp_frame:
-            
-            # Скачиваем видео из GCS
-            await download_file_from_gcs(video_url, temp_video.name)
-            
-            # Извлекаем последний кадр
-            extract_last_frame(temp_video.name, temp_frame.name)
-            
-            # Загружаем кадр обратно в GCS
-            frame_url = await upload_file_to_gcs(
-                temp_frame.name,
-                f"animations/frames/{os.path.basename(temp_frame.name)}"
-            )
-            
-            # Обновляем прогресс после получения кадра
-            segment.progress = 90
-            await session.commit()
-            
-            return frame_url
+    logger.info(f"-> Starting frame extraction from {video_url}")
+    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+        video_path = temp_video.name
+    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_frame:
+        frame_path = temp_frame.name
+    
+    try:
+        # Скачиваем видео из GCS
+        logger.info(f"   Downloading to {video_path}...")
+        await download_file_from_gcs(video_url, video_path)
+        logger.info(f"   Download complete.")
+        
+        # Извлекаем последний кадр
+        logger.info(f"   Extracting last frame to {frame_path}...")
+        extract_last_frame(video_path, frame_path)
+        logger.info(f"   Frame extracted.")
+        
+        # Загружаем кадр обратно в GCS
+        destination_blob = f"animations/frames/{os.path.basename(frame_path)}"
+        logger.info(f"   Uploading frame to GCS at {destination_blob}...")
+        frame_url = await upload_file_to_gcs(
+            frame_path,
+            destination_blob
+        )
+        logger.info(f"   Upload complete: {frame_url}")
+        
+        # Обновляем прогресс после получения кадра
+        segment.progress = 95 # Changed from 90 to avoid confusion
+        await session.commit()
+        
+        return frame_url
+    except Exception as e:
+        logger.error(f"-> Frame extraction FAILED: {e}", exc_info=True)
+        raise  # Re-raise the exception to be caught by the outer block
+    finally:
+        # Clean up temporary files
+        if os.path.exists(video_path):
+            os.unlink(video_path)
+        if os.path.exists(frame_path):
+            os.unlink(frame_path)
+        logger.info("   Temporary files cleaned up.")
 
 
 async def _update_segment_status(project_id: UUID, segment_number: int, status: AnimationStatus):

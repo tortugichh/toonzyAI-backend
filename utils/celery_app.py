@@ -1,6 +1,7 @@
 import os
 from celery import Celery
 from dotenv import load_dotenv
+from kombu import Queue
 
 load_dotenv()
 
@@ -15,7 +16,8 @@ celery_app = Celery(
     backend=REDIS_URL,
     include=[
         "tasks.generation_tasks",
-        "tasks.assembly_tasks"
+        "tasks.assembly_tasks",
+        "tasks.agent_tasks"
     ]
 )
 
@@ -50,11 +52,20 @@ celery_app.conf.update(
     task_routes={
         'tasks.generation_tasks.*': {'queue': 'generation'},
         'tasks.assembly_tasks.*': {'queue': 'assembly'},
+        'tasks.agent_tasks.*': {'queue': 'agent'},
     },
     
     # Мониторинг
     worker_send_task_events=True,
     task_send_sent_event=True,
+)
+
+# Явно объявляем все используемые очереди, чтобы воркеры могли на них подписаться
+celery_app.conf.task_queues = (
+    Queue("celery"),
+    Queue("generation"),
+    Queue("assembly"),
+    Queue("agent"),
 )
 
 # Автоматическое обнаружение задач

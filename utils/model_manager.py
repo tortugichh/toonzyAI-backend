@@ -7,9 +7,19 @@ from typing import Optional, Tuple
 import logging
 import asyncio
 from dotenv import load_dotenv
+
 load_dotenv()
+
 from google.cloud import aiplatform
 from google.cloud.aiplatform.gapic import PredictionServiceClient
+
+# Optional: automatic translation for non-English prompts
+try:
+    from google.cloud import translate_v2 as translate  # Lightweight client
+except ImportError:  # translate library may be missing in some envs
+    translate = None  # Fallback: no translation
+
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -35,6 +45,16 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
     Возвращает (image_bytes, image_base64).
     """
     try:
+        # Detect non-English text (simple heuristic: presence of Cyrillic chars)
+        original_prompt = prompt
+        if translate and re.search(r"[\u0400-\u04FF]", prompt):
+            try:
+                translator = translate.Client()
+                prompt = translator.translate(prompt, target_language="en")["translatedText"]
+                logger.info(f"Prompt translated to English for Imagen: '{original_prompt}' -> '{prompt}'")
+            except Exception as te:
+                logger.warning(f"Failed to translate prompt '{original_prompt}': {te}. Using original text.")
+
         aiplatform.init(project=VERTEX_PROJECT, location=VERTEX_LOCATION)
         endpoint = _get_model_path()
         prediction_client = PredictionServiceClient()

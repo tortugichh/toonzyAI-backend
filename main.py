@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from routers import avatar_routes, auth_routes, animation_routes, progress_ws
+from routers import avatar_routes, auth_routes, animation_routes, progress_ws, story_routes
 from middleware.logging import LoggingMiddleware
 from contextlib import asynccontextmanager
 
@@ -65,6 +65,7 @@ app.include_router(avatar_routes.router, prefix="/api/v1", tags=["avatars"])
 app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(animation_routes.router, prefix="/api/v1/animations", tags=["animations"])
 app.include_router(progress_ws.router, prefix="/api/ws", tags=["websocket"])
+app.include_router(story_routes.router, prefix="/api/v1", tags=["stories"])
 
 @app.get("/health")
 async def health():

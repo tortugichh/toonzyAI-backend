@@ -13,8 +13,10 @@ services:
       - .:/app
       - ./service-account-key:/app/service-account-key
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -27,7 +29,7 @@ services:
     image: redis:7-alpine
     container_name: toonzyai-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
@@ -44,14 +46,16 @@ services:
     container_name: toonzyai-celery
     env_file:
       - .env
-    command: celery -A celery_worker worker --loglevel=info --queues=generation,assembly,celery
+    command: celery -A celery_worker worker --loglevel=info --queues=generation,assembly,celery,agent
     volumes:
       - ./static:/app/static
       - .:/app
       - ./service-account-key:/app/service-account-key
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "celery", "-A", "celery_worker", "inspect", "ping"]
@@ -85,7 +89,7 @@ services:
     env_file:
       - .env
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
