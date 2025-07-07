@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
-# If the alembic_version table is empty, mark the database as already having all baseline migrations applied.
-if ! alembic current >/dev/null 2>&1; then
-  echo "[entrypoint] alembic_version table is empty – stamping to baseline revision d2d2a701d434"
-  alembic stamp d2d2a701d434
+# Run migrations from scratch (idempotent): если таблицы уже существуют – Alembic пропустит шаги.
+echo "[entrypoint] Running alembic upgrade head"
+almbk_err=0
+if alembic upgrade head; then
+  echo "[entrypoint] Migrations up-to-date"
+else
+  almbk_err=$?
+  echo "[entrypoint] ERROR: alembic upgrade failed with exit code $almbk_err" >&2
+  exit $almbk_err
 fi
 
-# Apply any migrations that came after the baseline (idempotent if already applied)
- echo "[entrypoint] Running alembic upgrade head"
- almbk_err=0
- if alembic upgrade head; then
-   echo "[entrypoint] Migrations up-to-date"
- else
-   almbk_err=$?
-   echo "[entrypoint] ERROR: alembic upgrade failed with exit code $almbk_err" >&2
-   exit $almbk_err
- fi
-
-# Launch the FastAPI application with Gunicorn (4 workers)
+# Запускаем FastAPI через Gunicorn
 exec gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 4 --bind 0.0.0.0:8000 --log-level info 
