@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Response, Depends, Query
 from schemas.avatar_schemas import AvatarCreateRequest, AvatarResponse, AvatarListResponse, AvatarStatusResponse
 import logging
 from utils.avatar_agent import generate_avatar
+from utils.content_moderator import check_prompt_safety
 import os
 from google.cloud import storage
 from db.avatar_repository import get_avatar_by_id, get_db, User, Avatar
@@ -23,6 +24,21 @@ async def create_avatar(
 ) -> AvatarResponse:
     """Creates a new avatar for the authenticated user."""
     logger.info(f"Received avatar creation request from user {current_user.username}: {request.prompt}")
+    
+    # Проверяем промпт на безопасность
+    moderation_result = check_prompt_safety(request.prompt)
+    if not moderation_result.is_safe:
+        logger.warning(f"Unsafe prompt detected from user {current_user.username}: {moderation_result.reasons}")
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "error": "content_policy_violation",
+                "message": "Ваш промпт нарушает политику контента",
+                "reasons": moderation_result.reasons,
+                "suggested_fix": moderation_result.suggested_fix
+            }
+        )
+    
     try:
         result = await generate_avatar(request, current_user.id)
         logger.info(f"Avatar created successfully for user {current_user.username}: {result.avatar_id}")

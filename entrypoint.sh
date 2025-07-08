@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
+# Wait until Postgres is accepting TCP connections
+until nc -z db 5432; do
+  echo "[entrypoint] Waiting for Postgres to be available at db:5432..."
+  sleep 1
+done
+
 # Run migrations from scratch (idempotent): если таблицы уже существуют – Alembic пропустит шаги.
 echo "[entrypoint] Running alembic upgrade head"
 almbk_err=0
