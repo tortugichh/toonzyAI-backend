@@ -4,9 +4,9 @@
 Бекенд построен на **FastAPI** (Python 3.10), использует:
 * **PostgreSQL** + `asyncpg` + `SQLAlchemy 2.x` (Async)  
 * **Redis** как брокер и backend для **Celery 5**  
-* **Celery** – фоновые задачи (генерация сегментов, сборка видео, multi-agent)  
+* **Celery** - фоновые задачи (генерация сегментов, сборка видео, multi-agent)  
 * **FFmpeg** для видео-обработки  
-* Хранение файлов – Google Cloud Storage (с возможностью fallback на локальный режим).
+* Хранение файлов - Google Cloud Storage (с возможностью fallback на локальный режим).
 
 ## Быстрый старт (Docker-Compose)
 
@@ -64,13 +64,13 @@ celery -A utils.celery_app.celery_app worker -l info -Q default -c 4
 ## Переменные окружения (ключевые)
 | Переменная            | Значение по умолчанию | Описание |
 |-----------------------|-----------------------|----------|
-| `DATABASE_URL`        | —                     | строка подключения PostgreSQL (asyncpg) |
+| `DATABASE_URL`        | -                     | строка подключения PostgreSQL (asyncpg) |
 | `REDIS_URL`           | `redis://redis:6379/0`| брокер Celery |
-| `GCS_BUCKET`          | —                     | имя GCS-бакета для хранения видео |
-| `GOOGLE_CLOUD_PROJECT`| —                     | ID проекта GCP |
-| `VEO_API_KEY`         | —                     | ключ/токен к Vertex AI Veo |
+| `GCS_BUCKET`          | -                     | имя GCS-бакета для хранения видео |
+| `GOOGLE_CLOUD_PROJECT`| -                     | ID проекта GCP |
+| `VEO_API_KEY`         | -                     | ключ/токен к Vertex AI Veo |
 
-Полный список — смотрите файлы `.env.example` и `utils/*_client*.py`.
+Полный список - смотрите файлы `.env.example` и `utils/*_client*.py`.
 
 ## Запуск без Docker
 ```bash
