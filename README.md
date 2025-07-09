@@ -1,4 +1,5 @@
 # ToonzyAI – Бекенд
+[Сайт проекта](https://toonzyai.me) • [Фронтенд репозиторий](https://github.com/tortugichh/toonzyai-frontend)
 
 Бекенд построен на **FastAPI** (Python 3.10), использует:
 * **PostgreSQL** + `asyncpg` + `SQLAlchemy 2.x` (Async)  
