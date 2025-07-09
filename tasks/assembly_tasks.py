@@ -5,6 +5,7 @@ from uuid import UUID
 from typing import List
 from celery import shared_task
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 import logging
 
 from utils.celery_app import celery_app
@@ -14,49 +15,67 @@ from db.avatar_repository import (
     AnimationProject, 
     AnimationSegment, 
     AnimationStatus,
-    async_session
 )
 
 logger = logging.getLogger(__name__)
 
+# Создаем отдельный движок для Celery задач
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL not configured")
+
+celery_engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
+
+CeleryAsyncSession = async_sessionmaker(
+    celery_engine, 
+    class_=AsyncSession, 
+    expire_on_commit=False
+)
+
 
 @celery_app.task(bind=True, max_retries=2)
 def assemble_video_task(self, project_id: str):
-    """
-    Celery задача для сборки финального видео из всех сегментов.
-    
-    Args:
-        project_id: UUID проекта анимации
-    """
+    """Celery task for assembling final video."""
     try:
-        # Запускаем асинхронную функцию в event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Obtain or create a persistent event loop for this worker process
         try:
-            result = loop.run_until_complete(
-                _assemble_video_async(UUID(project_id))
-            )
-            return result
-        finally:
-            loop.close()
-            
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_assemble_video_async(UUID(project_id)))
+        return result
+
     except Exception as exc:
         logger.error(f"Error in assemble_video_task: {exc}")
-        
-        # Обновляем статус проекта на failed
-        loop = asyncio.new_event_loop()
+        # Update project status to FAILED (best-effort)
         try:
-            loop.run_until_complete(
-                _update_project_status(UUID(project_id), AnimationStatus.FAILED)
-            )
-        finally:
-            loop.close()
-        
-        # Retry логика
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_update_project_status(UUID(project_id), AnimationStatus.FAILED))
+        except Exception as status_err:
+            logger.error(f"Failed to mark project as FAILED: {status_err}")
+
+        # Retry with back-off
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=60 * (self.request.retries + 1))
-        
         raise exc
 
 
@@ -64,7 +83,7 @@ async def _assemble_video_async(project_id: UUID) -> dict:
     """
     Асинхронная функция для сборки финального видео.
     """
-    async with async_session() as session:
+    async with CeleryAsyncSession() as session:
         try:
             # 1. Получаем проект
             project_query = select(AnimationProject).where(AnimationProject.id == project_id)
@@ -97,9 +116,13 @@ async def _assemble_video_async(project_id: UUID) -> dict:
             # 4. Скачиваем все видео-сегменты
             temp_video_paths = await _download_segments(segments)
             
-            # 5. Валидируем все видеофайлы
+            # 5. Валидируем все видеофайлы и логируем подробности
             for path in temp_video_paths:
-                if not validate_video_file(path):
+                is_valid = validate_video_file(path)
+                if is_valid:
+                    logger.debug(f"✅ Video validated: {path}")
+                else:
+                    logger.error(f"❌ Invalid video file detected: {path}")
                     raise ValueError(f"Invalid video file: {path}")
             
             # 6. Собираем финальное видео
@@ -107,7 +130,11 @@ async def _assemble_video_async(project_id: UUID) -> dict:
                 final_video_path = final_video.name
             
             logger.info(f"Concatenating {len(temp_video_paths)} video segments")
-            concatenate_videos(temp_video_paths, final_video_path)
+            try:
+                concatenate_videos(temp_video_paths, final_video_path)
+            except Exception as ffmpeg_err:
+                logger.exception(f"FFmpeg concatenate_videos failed: {ffmpeg_err}")
+                raise
             
             # 7. Загружаем финальное видео в GCS
             final_video_url = await upload_file_to_gcs(
@@ -189,7 +216,7 @@ async def _update_project_status(project_id: UUID, status: AnimationStatus):
     """
     Обновляет статус проекта.
     """
-    async with async_session() as session:
+    async with CeleryAsyncSession() as session:
         try:
             stmt = update(AnimationProject).where(
                 AnimationProject.id == project_id
@@ -205,21 +232,20 @@ async def _update_project_status(project_id: UUID, status: AnimationStatus):
 
 @celery_app.task(bind=True)
 def check_segments_completion_task(self, project_id: str):
-    """
-    Задача для проверки готовности всех сегментов и запуска сборки.
-    """
+    """Checks if all segments are ready and starts assembly when appropriate."""
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Shared event loop logic
         try:
-            result = loop.run_until_complete(
-                _check_segments_completion_async(UUID(project_id))
-            )
-            return result
-        finally:
-            loop.close()
-            
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(_check_segments_completion_async(UUID(project_id)))
+
     except Exception as exc:
         logger.error(f"Error checking segments completion: {exc}")
         raise
@@ -229,7 +255,7 @@ async def _check_segments_completion_async(project_id: UUID) -> dict:
     """
     Проверяет готовность всех сегментов и запускает сборку если нужно.
     """
-    async with async_session() as session:
+    async with CeleryAsyncSession() as session:
         try:
             # Получаем проект
             project_query = select(AnimationProject).where(AnimationProject.id == project_id)

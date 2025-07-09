@@ -10,7 +10,7 @@ class AnimationProjectCreate(BaseModel):
     """Схема для создания проекта анимации. Общий промпт теперь опционален."""
     name: str = Field(..., min_length=1, max_length=255, description="Название проекта")
     source_avatar_id: UUID = Field(..., description="ID исходного аватара для анимации")
-    total_segments: int = Field(..., gt=0, le=10, description="Количество видео-сегментов (1-10)")
+    total_segments: int = Field(..., gt=0, le=5, description="Количество видео-сегментов (1-5)")
     animation_prompt: Optional[str] = Field(None, max_length=500, description="(Необязательно) Общий промпт для анимации")
 
 

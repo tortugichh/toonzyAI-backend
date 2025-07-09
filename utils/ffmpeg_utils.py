@@ -56,6 +56,7 @@ def concatenate_videos(video_paths: List[str], output_video_path: str) -> None:
             "-c", "copy",  # Копировать без перекодирования
             output_video_path
         ]
+        print('[ffmpeg_utils] Running:', ' '.join(command))
         
         subprocess.run(command, check=True, capture_output=True, text=True)
         

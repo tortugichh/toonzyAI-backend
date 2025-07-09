@@ -107,7 +107,14 @@ async def create_animation_project(
                 detail="Avatar not found or doesn't belong to current user"
             )
         
-        # 2. Создаем проект анимации
+        # 2. Проверяем допустимое количество сегментов (1-5)
+        if project_data.total_segments < 1 or project_data.total_segments > 5:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="total_segments must be between 1 and 5"
+            )
+
+        # 3. Создаем проект анимации
         animation_project = AnimationProject(
             user_id=current_user.id,
             source_avatar_id=project_data.source_avatar_id,
@@ -121,13 +128,13 @@ async def create_animation_project(
         await db.commit()
         await db.refresh(animation_project)
         
-        # 3. Запускаем фоновую задачу создания сегментов
+        # 4. Запускаем фоновую задачу создания сегментов
         from tasks.generation_tasks import create_animation_segments_task
         create_animation_segments_task.delay(str(animation_project.id))
         
         logger.info(f"Created animation project {animation_project.id} for user {current_user.id}")
         
-        # 4. Возвращаем созданный проект
+        # 5. Возвращаем созданный проект
         return AnimationProjectResponse(
             id=animation_project.id,
             user_id=animation_project.user_id,
