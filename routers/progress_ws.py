@@ -29,6 +29,19 @@ async def _fetch_progress_with_fresh_session(entity_type: str, entity_id: UUID):
             obj = None
         return obj
 
+async def _fetch_project_with_ownership_check(entity_id: UUID, user_id: UUID):
+    """Fetch project with ownership verification."""
+    from db.avatar_repository import AsyncSessionLocal
+    
+    async with AsyncSessionLocal() as fresh_db:
+        q = await fresh_db.execute(
+            select(AnimationProject).where(
+                AnimationProject.id == entity_id,
+                AnimationProject.user_id == user_id
+            )
+        )
+        return q.scalar_one_or_none()
+
 @router.websocket("/progress/{entity_type}/{entity_id}")
 async def ws_progress(websocket: WebSocket, entity_type: str, entity_id: str, db: AsyncSession = Depends(get_db)):
     """WebSocket, который шлёт JSON-объекты с прогрессом каждый 2 секунды.
@@ -62,6 +75,7 @@ async def ws_progress(websocket: WebSocket, entity_type: str, entity_id: str, db
             await websocket.close(code=4401)
             return
         logger.info(f"Token verified successfully for user: {payload.username}")
+        user_id = UUID(payload.sub)  # извлекаем user_id из токена
     except Exception as e:
         logger.error(f"Token verification error: {e}")
         await websocket.close(code=4401)
@@ -75,12 +89,39 @@ async def ws_progress(websocket: WebSocket, entity_type: str, entity_id: str, db
         await websocket.close(code=4400)
         return
 
+    # Для новых проектов: ждём до 30 секунд, пока проект не появится в БД
+    if entity_type == "project":
+        max_wait_attempts = 30  # 30 секунд
+        wait_attempt = 0
+        
+        while wait_attempt < max_wait_attempts:
+            obj = await _fetch_project_with_ownership_check(uuid_val, user_id)
+            if obj:
+                logger.info(f"Project {entity_id} found after {wait_attempt} seconds")
+                break
+            
+            if wait_attempt == 0:
+                logger.info(f"Project {entity_id} not found yet, waiting for creation...")
+            
+            wait_attempt += 1
+            await asyncio.sleep(1)
+        
+        if not obj:
+            logger.warning(f"Project {entity_id} not found after {max_wait_attempts} seconds")
+            await websocket.send_json({"error": "not_found", "message": "Project not found or access denied"})
+            await websocket.close(code=4404)
+            return
+
     try:
         while True:
             # Use fresh session for each check to see latest updates
-            obj = await _fetch_progress_with_fresh_session(entity_type, uuid_val)
+            if entity_type == "project":
+                obj = await _fetch_project_with_ownership_check(uuid_val, user_id)
+            else:
+                obj = await _fetch_progress_with_fresh_session(entity_type, uuid_val)
+                
             if not obj:
-                await websocket.send_json({"error": "not_found"})
+                await websocket.send_json({"error": "not_found", "message": f"{entity_type} not found or access denied"})
                 await websocket.close(code=4404)
                 break
 

@@ -32,28 +32,34 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not configured")
 
-# Отдельный движок для задач Celery с собственным connection pool
-celery_engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    pool_size=5,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    # Изоляция для каждого процесса
-    connect_args={
-        "server_settings": {
-            "application_name": "celery_worker",
+def get_celery_async_session():
+    """
+    Создаёт новую async session для текущего event loop.
+    Решает проблему 'Future attached to a different loop'.
+    """
+    # Создаём engine в контексте текущего event loop
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=False,
+        pool_size=3,
+        max_overflow=5,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={
+            "server_settings": {
+                "application_name": "celery_worker",
+            }
         }
-    }
-)
-
-# Сессия для Celery задач
-CeleryAsyncSession = sessionmaker(
-    celery_engine, 
-    class_=AsyncSession, 
-    expire_on_commit=False
-)
+    )
+    
+    # Создаём sessionmaker для этого engine
+    async_session_factory = sessionmaker(
+        engine, 
+        class_=AsyncSession, 
+        expire_on_commit=False
+    )
+    
+    return async_session_factory()
 
 
 @celery_app.task(name="tasks.generation_tasks.generate_segment_task", bind=True, max_retries=3)
@@ -72,21 +78,8 @@ def generate_segment_task(self, project_id: str, segment_number: int):
     try:
         logger.info(f"🎬 Starting segment generation task: project {project_id}, segment {segment_number}")
         
-        # Правильное управление event loop в Celery
-        try:
-            # Пытаемся получить текущий event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                # Если loop закрыт, создаем новый
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            # Если нет event loop, создаем новый
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Запускаем асинхронную функцию в правильном контексте
-        result = loop.run_until_complete(_generate_segment_async(UUID(project_id), segment_number))
+        # Используем asyncio.run() для чистого управления event loop
+        result = asyncio.run(_generate_segment_async(UUID(project_id), segment_number))
         
         logger.info(f"✅ Segment generation completed: {result}")
         return result
@@ -107,7 +100,7 @@ async def _generate_segment_async(project_id: UUID, segment_number: int) -> dict
     """
     Асинхронная функция для генерации сегмента.
     """
-    async with CeleryAsyncSession() as session:
+    async with get_celery_async_session() as session:
         try:
             # 1. Получаем информацию о проекте
             project_query = select(AnimationProject).where(AnimationProject.id == project_id)
@@ -314,7 +307,7 @@ async def _update_segment_status(project_id: UUID, segment_number: int, status: 
     """
     Обновляет статус сегмента.
     """
-    async with CeleryAsyncSession() as session:
+    async with get_celery_async_session() as session:
         try:
             stmt = update(AnimationSegment).where(
                 AnimationSegment.animation_project_id == project_id,
@@ -335,18 +328,10 @@ def create_animation_segments_task(self, project_id: str):
     Задача для создания записей сегментов в БД после создания проекта.
     """
     try:
-        # Создаем новый event loop для Celery
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                _create_segments_async(UUID(project_id))
-            )
-            return result
-        finally:
-            loop.close()
-            
+        # Используем asyncio.run() - он автоматически создаёт и управляет event loop
+        result = asyncio.run(_create_segments_async(UUID(project_id)))
+        return result
+             
     except Exception as exc:
         logger.error(f"Error creating segments: {exc}")
         raise
@@ -356,7 +341,7 @@ async def _create_segments_async(project_id: UUID) -> dict:
     """
     Создает записи сегментов в БД и запускает генерацию первого.
     """
-    async with CeleryAsyncSession() as session:
+    async with get_celery_async_session() as session:
         try:
             # Получаем проект
             project_query = select(AnimationProject).where(AnimationProject.id == project_id)
@@ -374,10 +359,49 @@ async def _create_segments_async(project_id: UUID) -> dict:
             existing_segments = existing_segments_result.scalars().all()
             
             if len(existing_segments) > 0:
-                logger.info(f"Segments already exist for project {project_id}, skipping creation")
-                return {"status": "segments_already_exist", "total_segments": len(existing_segments)}
-            
-            # Создаем записи для всех сегментов - БЕЗ АВТОЗАПУСКА!
+                # Обновленная логика: если часть сегментов отсутствует (например, из-за сбоя таска),
+                # дозаписываем ТОЛЬКО недостающие segment_number’ы.
+                # ---
+                existing_numbers = {seg.segment_number for seg in existing_segments}
+                missing_numbers = [i for i in range(1, project.total_segments + 1) if i not in existing_numbers]
+
+                if not missing_numbers:
+                    logger.info(
+                        f"All {project.total_segments} segments already exist for project {project_id}, nothing to create"
+                    )
+                    return {
+                        "status": "segments_already_exist",
+                        "total_segments": len(existing_segments)
+                    }
+
+                logger.warning(
+                    f"Detected missing segments for project {project_id}: {missing_numbers}. Re-creating them."
+                )
+
+                for num in missing_numbers:
+                    segment = AnimationSegment(
+                        animation_project_id=project_id,
+                        segment_number=num,
+                        status=AnimationStatus.PENDING,
+                        start_frame_url="",  # будет заполнено позже
+                        segment_prompt=None
+                    )
+                    session.add(segment)
+
+                # Сохраняем только что добавленные недостающие сегменты
+                await session.commit()
+
+                logger.info(
+                    f"✅ Successfully (re)created {len(missing_numbers)} missing segments for project {project_id}"
+                )
+
+                return {
+                    "status": "missing_segments_created",
+                    "total_segments": project.total_segments,
+                    "created": len(missing_numbers)
+                }
+
+            # Если existing_segments пуст, создаём ВСЕ сегменты c нуля
             for i in range(1, project.total_segments + 1):
                 segment = AnimationSegment(
                     animation_project_id=project_id,

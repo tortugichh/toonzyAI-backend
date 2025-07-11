@@ -83,6 +83,9 @@ def create_video_stream(video_data: bytes, start: int = 0, end: Optional[int] = 
         current_pos = chunk_end
 
 
+# ===== Maintenance flag =====
+MAINTENANCE_MODE = True  # Set to False when generation is allowed again
+
 @router.post("/", status_code=status.HTTP_202_ACCEPTED, response_model=AnimationProjectResponse)
 async def create_animation_project(
     project_data: AnimationProjectCreate,
@@ -92,6 +95,9 @@ async def create_animation_project(
     """
     Создает новый проект анимации и запускает генерацию сегментов.
     """
+    if MAINTENANCE_MODE:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Video generation is temporarily disabled for maintenance. Please try later.")
     try:
         # 1. Проверяем, что аватар принадлежит текущему пользователю
         avatar_query = select(Avatar).where(
@@ -610,6 +616,9 @@ async def generate_specific_segment(
     🎬 ПОЛЬЗОВАТЕЛЬСКИЙ КОНТРОЛЬ: Запускает генерацию конкретного сегмента.
     Пользователь может генерировать каждый кадр когда захочет!
     """
+    if MAINTENANCE_MODE:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Video generation is temporarily disabled for maintenance. Please try later.")
     try:
         # Проверяем, что проект принадлежит пользователю
         project_query = select(AnimationProject).where(
@@ -907,6 +916,9 @@ async def generate_all_segments_parallel(
     🚀 PARALLEL GENERATION: Запускает генерацию ВСЕХ сегментов одновременно!
     Все сегменты генерируются параллельно, независимо друг от друга.
     """
+    if MAINTENANCE_MODE:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Video generation is temporarily disabled for maintenance. Please try later.")
     try:
         # Проверяем, что проект принадлежит пользователю
         project_query = select(AnimationProject).where(

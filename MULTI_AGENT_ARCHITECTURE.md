@@ -207,3 +207,4 @@ sequenceDiagram
     DIR-->>API: job complete + URL
     API-->>FE: WebSocket {video_url}
 ```
+ 

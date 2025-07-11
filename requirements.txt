@@ -46,7 +46,7 @@ six
 python-dotenv
 ffmpeg-python
 gunicorn
-
+ 
 # LLM-related dependencies
 google-generativeai>=0.4.1
 langchain-google-genai>=0.0.8

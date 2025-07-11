@@ -62,11 +62,11 @@ async def upload_file_to_gcs(file_path: str, destination_filename: str) -> str:
         raise ValueError("GCS_BUCKET environment variable is not set")
     if not GCS_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
-
+        
     client = storage.Client(project=GCS_PROJECT)
     bucket = client.bucket(GCS_BUCKET)
     blob = bucket.blob(destination_filename)
-
+    
     # Determine content type based on file extension
     if file_path.endswith(('.mp4', '.avi', '.mov')):
         content_type = 'video/mp4'
@@ -74,9 +74,9 @@ async def upload_file_to_gcs(file_path: str, destination_filename: str) -> str:
         content_type = 'image/jpeg' if file_path.endswith(('.jpg', '.jpeg')) else 'image/png'
     else:
         content_type = 'application/octet-stream'
-
+    
     blob.upload_from_filename(file_path, content_type=content_type)
-
+    
     return f"gs://{GCS_BUCKET}/{destination_filename}"
 
 
@@ -90,9 +90,9 @@ async def download_file_from_gcs(gcs_url: str, local_path: str) -> None:
     """
     if not GCS_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
-
+        
     client = storage.Client(project=GCS_PROJECT)
-
+    
     # Parse GCS URL
     if gcs_url.startswith("gs://"):
         parts = gcs_url[5:].split("/", 1)
@@ -101,7 +101,7 @@ async def download_file_from_gcs(gcs_url: str, local_path: str) -> None:
     else:
         bucket_name = GCS_BUCKET
         blob_name = gcs_url.split("/")[-1]
-
+    
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     blob.download_to_filename(local_path)

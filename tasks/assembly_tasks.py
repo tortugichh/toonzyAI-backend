@@ -53,10 +53,10 @@ def assemble_video_task(self, project_id: str):
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
+        
         result = loop.run_until_complete(_assemble_video_async(UUID(project_id)))
         return result
-
+            
     except Exception as exc:
         logger.error(f"Error in assemble_video_task: {exc}")
         # Update project status to FAILED (best-effort)
@@ -72,7 +72,7 @@ def assemble_video_task(self, project_id: str):
             loop.run_until_complete(_update_project_status(UUID(project_id), AnimationStatus.FAILED))
         except Exception as status_err:
             logger.error(f"Failed to mark project as FAILED: {status_err}")
-
+        
         # Retry with back-off
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=60 * (self.request.retries + 1))
@@ -243,9 +243,9 @@ def check_segments_completion_task(self, project_id: str):
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
+        
         return loop.run_until_complete(_check_segments_completion_async(UUID(project_id)))
-
+            
     except Exception as exc:
         logger.error(f"Error checking segments completion: {exc}")
         raise
