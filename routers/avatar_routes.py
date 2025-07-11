@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ===== Maintenance flag (shared with animation_routes) =====
+from routers.animation_routes import MAINTENANCE_MODE  # reuse flag
+
 @router.post("/avatars/", response_model=AvatarResponse)
 async def create_avatar(
     request: AvatarCreateRequest, 
@@ -23,6 +26,8 @@ async def create_avatar(
     db: AsyncSession = Depends(get_db)
 ) -> AvatarResponse:
     """Creates a new avatar for the authenticated user."""
+    if MAINTENANCE_MODE:
+        raise HTTPException(status_code=503, detail="Image generation is temporarily disabled for maintenance. Please try later.")
     logger.info(f"Received avatar creation request from user {current_user.username}: {request.prompt}")
     
     # Проверяем промпт на безопасность

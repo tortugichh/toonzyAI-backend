@@ -616,6 +616,7 @@ async def generate_specific_segment(
     🎬 ПОЛЬЗОВАТЕЛЬСКИЙ КОНТРОЛЬ: Запускает генерацию конкретного сегмента.
     Пользователь может генерировать каждый кадр когда захочет!
     """
+    
     if MAINTENANCE_MODE:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Video generation is temporarily disabled for maintenance. Please try later.")
