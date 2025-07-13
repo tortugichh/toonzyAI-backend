@@ -24,8 +24,8 @@ async def create_story_generation(
     Returns Celery task ID so the client can poll for status/result.
     """
     try:
-        logger.info("User %s requested story generation: %s", current_user.username, request.prompt)
-        async_result = generate_story.delay(request.prompt)
+        logger.info("User %s requested story generation: %s", current_user.username, request)
+        async_result = generate_story.delay(request.dict())
         return StoryStatusResponse(task_id=async_result.id, status="PENDING")
     except Exception as e:
         logger.exception("Failed to enqueue story generation task: %s", e)

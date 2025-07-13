@@ -22,16 +22,39 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="tasks.agent_tasks.generate_story", bind=True, max_retries=2)
-def generate_story(self, user_prompt: str) -> Dict[str, Any]:
+def generate_story(self, story_data: dict) -> Dict[str, Any]:
     """Celery task entrypoint – orchestrates the full MAS up to prompt parts.
 
     Args:
-        user_prompt: High-level idea from user.
+        story_data: dict with fields from StoryCreateRequest.
     Returns:
         Dict with keys: script, style, characters, environments.
     """
     try:
-        logger.info("🎬 [MAS] Starting story generation for prompt: %s", user_prompt)
+        # Собираем строку prompt из структурированных полей
+        prompt_parts = []
+        if story_data.get("prompt"):
+            prompt_parts.append(f"Prompt: {story_data['prompt']}")
+        if story_data.get("genre"):
+            prompt_parts.append(f"Genre: {story_data['genre']}")
+        if story_data.get("style"):
+            prompt_parts.append(f"Style: {story_data['style']}")
+        if story_data.get("theme"):
+            prompt_parts.append(f"Theme: {story_data['theme']}")
+        if story_data.get("book_style"):
+            prompt_parts.append(f"Book style: {story_data['book_style']}")
+        if story_data.get("wishes"):
+            prompt_parts.append(f"Wishes: {story_data['wishes']}")
+        if story_data.get("characters"):
+            chars = story_data["characters"]
+            if chars:
+                char_str = "; ".join([
+                    f"{c.get('name', '')} ({c.get('role', '')}): {c.get('description', '')}" for c in chars
+                ])
+                prompt_parts.append(f"Characters: {char_str}")
+        user_prompt = " | ".join(prompt_parts)
+
+        logger.info("🎬 [MAS] Starting story generation for structured input: %s", user_prompt)
 
         # Manage event loop similar to other tasks
         try:

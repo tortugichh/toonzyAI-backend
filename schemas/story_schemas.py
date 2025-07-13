@@ -2,9 +2,20 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 
+class CharacterInput(BaseModel):
+    name: str
+    description: Optional[str] = None
+    role: Optional[str] = None
+
 class StoryCreateRequest(BaseModel):
-    """Request body when user wants to create a new story."""
-    prompt: str = Field(..., description="High-level idea or prompt from the user")
+    """Request body when user wants to create a new story (structured)."""
+    prompt: Optional[str] = Field(None, description="High-level idea or prompt from the user (for backward compatibility)")
+    genre: Optional[str] = Field(None, description="Genre of the story (fairy tale, sci-fi, etc.)")
+    style: Optional[str] = Field(None, description="Style or mood (funny, magical, dark, etc.)")
+    theme: Optional[str] = Field(None, description="Main theme or topic of the story")
+    book_style: Optional[str] = Field(None, description="Book visual style (colorful, vintage, etc.)")
+    characters: Optional[List[CharacterInput]] = Field(default_factory=list, description="List of characters")
+    wishes: Optional[str] = Field(None, description="Special wishes or requirements for the story")
 
 
 class StoryStatusResponse(BaseModel):

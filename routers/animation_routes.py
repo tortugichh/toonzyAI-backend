@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from uuid import UUID
 from typing import List, Optional, Iterator
 import logging
@@ -99,6 +99,13 @@ async def create_animation_project(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Video generation is temporarily disabled for maintenance. Please try later.")
     try:
+        # Лимит: только 1 анимационный проект на пользователя
+        count_query = select(func.count(AnimationProject.id)).where(AnimationProject.user_id == current_user.id)
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        if total >= 1:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступен только один анимационный проект для нового пользователя.")
+
         # 1. Проверяем, что аватар принадлежит текущему пользователю
         avatar_query = select(Avatar).where(
             Avatar.id == project_data.source_avatar_id,

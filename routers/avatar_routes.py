@@ -29,7 +29,14 @@ async def create_avatar(
     if MAINTENANCE_MODE:
         raise HTTPException(status_code=503, detail="Image generation is temporarily disabled for maintenance. Please try later.")
     logger.info(f"Received avatar creation request from user {current_user.username}: {request.prompt}")
-    
+
+    # Лимит: только 1 аватар на пользователя
+    count_query = select(func.count(Avatar.id)).where(Avatar.user_id == current_user.id)
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    if total >= 1:
+        raise HTTPException(status_code=403, detail="Доступна только одна генерация аватара для нового пользователя.")
+
     # Проверяем промпт на безопасность
     moderation_result = check_prompt_safety(request.prompt)
     if not moderation_result.is_safe:
@@ -43,7 +50,6 @@ async def create_avatar(
                 "suggested_fix": moderation_result.suggested_fix
             }
         )
-    
     try:
         result = await generate_avatar(request, current_user.id)
         logger.info(f"Avatar created successfully for user {current_user.username}: {result.avatar_id}")
