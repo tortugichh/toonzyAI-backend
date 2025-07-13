@@ -84,7 +84,7 @@ def create_video_stream(video_data: bytes, start: int = 0, end: Optional[int] = 
 
 
 # ===== Maintenance flag =====
-MAINTENANCE_MODE = True  # Set to False when generation is allowed again
+MAINTENANCE_MODE = False  # Set to False when generation is allowed again
 
 @router.post("/", status_code=status.HTTP_202_ACCEPTED, response_model=AnimationProjectResponse)
 async def create_animation_project(
