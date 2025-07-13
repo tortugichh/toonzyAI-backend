@@ -12,6 +12,7 @@ class AnimationProjectCreate(BaseModel):
     source_avatar_id: UUID = Field(..., description="ID исходного аватара для анимации")
     total_segments: int = Field(..., gt=0, le=5, description="Количество видео-сегментов (1-5)")
     animation_prompt: Optional[str] = Field(None, max_length=500, description="(Необязательно) Общий промпт для анимации")
+    animation_type: str = Field("independent", description="Тип анимации: 'sequential' или 'independent'")
 
 
 
@@ -63,6 +64,7 @@ class AnimationProjectResponse(BaseModel):
     video_url: Optional[str] = None
     # URL аватара для отображения на карточке проекта  
     source_avatar_url: Optional[str] = None
+    animation_type: str  # Тип анимации: 'sequential' или 'independent'
     created_at: datetime
     updated_at: datetime
     segments: List[AnimationSegmentResponse] = []
@@ -91,6 +93,7 @@ class AnimationProjectListResponse(BaseModel):
     video_url: Optional[str] = None
     # URL аватара для отображения на карточке проекта
     source_avatar_url: Optional[str] = None
+    animation_type: str  # Тип анимации: 'sequential' или 'independent'
     created_at: datetime
     
     @field_validator('final_video_url', 'video_url', 'source_avatar_url', mode='before')

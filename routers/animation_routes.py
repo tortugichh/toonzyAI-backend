@@ -127,7 +127,8 @@ async def create_animation_project(
             name=project_data.name,
             total_segments=project_data.total_segments,
             animation_prompt=project_data.animation_prompt,
-            status=AnimationStatus.PENDING
+            status=AnimationStatus.PENDING,
+            animation_type=project_data.animation_type
         )
         
         db.add(animation_project)
@@ -152,6 +153,7 @@ async def create_animation_project(
             final_video_url=animation_project.final_video_url,
             video_url=f"/api/v1/animations/{animation_project.id}/video" if animation_project.final_video_url else None,
             source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
+            animation_type=animation_project.animation_type,
             created_at=animation_project.created_at,
             updated_at=animation_project.updated_at,
             segments=[]  # Сегменты будут созданы асинхронно
@@ -215,6 +217,7 @@ async def get_animation_project(
             final_video_url=project.final_video_url,
             video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
             source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
+            animation_type=project.animation_type,  # <--- добавлено!
             created_at=project.created_at,
             updated_at=project.updated_at,
             segments=[
@@ -272,6 +275,7 @@ async def list_animation_projects(
                 final_video_url=project.final_video_url,
                 video_url=f"/api/v1/animations/{project.id}/video" if project.final_video_url else None,
                 source_avatar_url=f"/api/v1/avatars/{avatar.id}/image" if avatar and avatar.image_data else None,
+                animation_type=project.animation_type,  # <--- добавлено!
                 created_at=project.created_at
             )
             for project, avatar in projects_with_avatars
@@ -634,6 +638,18 @@ async def generate_specific_segment(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Animation project not found"
             )
+        
+        # sequential: разрешать только если предыдущий сегмент COMPLETED
+        if project.animation_type == "sequential":
+            if segment_number > 1:
+                prev_segment_query = select(AnimationSegment).where(
+                    AnimationSegment.animation_project_id == project_id,
+                    AnimationSegment.segment_number == segment_number - 1
+                )
+                prev_segment_result = await db.execute(prev_segment_query)
+                prev_segment = prev_segment_result.scalar_one_or_none()
+                if not prev_segment or prev_segment.status != AnimationStatus.COMPLETED:
+                    raise HTTPException(status_code=400, detail="Previous segment must be COMPLETED before generating this one.")
         
         # Находим сегмент
         segment_query = select(AnimationSegment).where(
