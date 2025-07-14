@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 origins_env = os.getenv("CORS_ORIGINS", "")
 extra_origins = [o.strip() for o in origins_env.split(',') if o.strip()]
 
+# Добавляем все нужные фронтенд-URL
+frontend_origins = [
+    "https://toonzyai.me",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+]
+
+# Объединяем с origins из переменной окружения (если есть)
+allow_origins = list(set(frontend_origins + extra_origins))
+
 app = FastAPI(
     title="ToonzyAI API",
     description="API for generating cartoon avatars using Vertex AI Imagen with JWT Authentication",
