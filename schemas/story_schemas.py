@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
 from uuid import UUID
+from datetime import datetime
 
 class CharacterInput(BaseModel):
     name: str
@@ -34,4 +35,23 @@ class StoryResultResponse(BaseModel):
     script: Dict[str, Any]
     style: Dict[str, Any]
     characters: Dict[str, Any]
-    environments: Dict[str, Any] 
+    environments: Dict[str, Any]
+    illustrations: Dict[str, Any]
+
+
+class StoryItemResponse(BaseModel):
+    """Individual story item in list response."""
+    id: UUID = Field(..., description="Story ID")
+    title: str = Field(..., description="Story title")
+    theme: Optional[str] = Field(None, description="Story theme")
+    genre: Optional[str] = Field(None, description="Story genre")
+    style: Optional[str] = Field(None, description="Story style")
+    status: str = Field(..., description="Generation status")
+    preview_text: Optional[str] = Field(None, description="Preview text from first page")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    task_id: str = Field(..., description="Celery task ID")
+
+
+class StoryListResponse(BaseModel):
+    """Response for list of user stories."""
+    stories: List[StoryItemResponse] = Field(..., description="List of stories") 

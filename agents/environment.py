@@ -26,9 +26,12 @@ class EnvironmentAgentOutput(BaseModel):
 
 class EnvironmentAgent(BaseAgent):
     async def run(self, script: Dict[str, Any]) -> EnvironmentAgentOutput:  # type: ignore[override]
+        language_instruction = self.get_language_instruction()
+        
         system_prompt = (
             "You are a background artist. For each scene in the script produce a concise environment description (lighting, setting, mood). "
-            "Return JSON with key 'environments': list of objects {scene_id, environment_description}."
+            "Return JSON with key 'environments': list of objects {scene_id, environment_description}.\n"
+            f"{language_instruction}"
         )
 
         messages = [

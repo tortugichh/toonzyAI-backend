@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean, Integer, ForeignKey, Enum
+from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean, Integer, ForeignKey, Enum, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.sql import select, update
@@ -40,6 +40,13 @@ class AnimationStatus(enum.Enum):
     FAILED = "failed"
     ASSEMBLING = "assembling"
 
+class StoryStatus(enum.Enum):
+    """Статусы для историй."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
 class User(Base):
     __tablename__ = "users"
     id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -61,6 +68,37 @@ class Avatar(Base):
     status = mapped_column(String, nullable=False)
     progress = mapped_column(Integer, default=0, nullable=False)
     moderation_flags = mapped_column(Text, nullable=True)  # comma-separated
+
+class Story(Base):
+    """Модель для хранения созданных историй."""
+    __tablename__ = "stories"
+    
+    id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Мета-информация истории
+    title = mapped_column(String(255), nullable=True)
+    prompt = mapped_column(Text, nullable=True)
+    genre = mapped_column(String(100), nullable=True)
+    style = mapped_column(String(100), nullable=True)
+    theme = mapped_column(String(255), nullable=True)
+    book_style = mapped_column(String(100), nullable=True)
+    wishes = mapped_column(Text, nullable=True)
+    
+    # ID Celery задачи
+    task_id = mapped_column(String(255), nullable=False, unique=True)
+    
+    # Статус генерации
+    status = mapped_column(Enum(StoryStatus), default=StoryStatus.PENDING, nullable=False)
+    
+    # Результат генерации (JSON)
+    story_data = mapped_column(JSON, nullable=True)  # Полный результат от агентов
+    
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User")
 
 class AnimationProject(Base):
     """Проект анимации - контейнер для серии видео-сегментов."""

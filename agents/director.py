@@ -42,8 +42,8 @@ class Director(BaseAgent):
                 "Scriptwriter agent is not yet implemented."
             )
 
-        # 1. Generate script
-        scriptwriter = Scriptwriter(llm=self.llm)
+        # 1. Generate script with language support
+        scriptwriter = Scriptwriter(llm=self.llm, language=self.language)
         script_data = await scriptwriter.run(user_prompt)
 
         # 2. Return structured result (will be enriched later)

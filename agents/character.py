@@ -27,13 +27,16 @@ class CharacterAgentOutput(BaseModel):
 
 class CharacterAgent(BaseAgent):
     async def run(self, script: Dict[str, Any]) -> CharacterAgentOutput:  # type: ignore[override]
+        language_instruction = self.get_language_instruction()
+        
         system_prompt = (
             "You are responsible for character design consistency. "
             "Given the animation script, identify every distinct CHARACTER. "
             "For each character return: \n"
             "  • name – string\n  • description – 1 short sentence describing appearance/personality (cannot be empty)\n"
             "  • attire – typical clothes/accessories or 'N/A' if none (cannot be empty).\n"
-            "Respond ONLY with valid JSON: {\"characters\": [{...}]}. No markdown fences."
+            "Respond ONLY with valid JSON: {\"characters\": [{...}]}. No markdown fences.\n"
+            f"{language_instruction}"
         )
 
         messages = [

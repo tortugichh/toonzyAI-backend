@@ -37,6 +37,8 @@ class ArtDirector(BaseAgent):
     """Generate visual style guidance."""
 
     async def run(self, script: Dict[str, Any]) -> ArtDirectorOutput:  # type: ignore[override]
+        language_instruction = self.get_language_instruction()
+        
         system_prompt = (
             "You are an experienced art director for animated films. "
             "Given the JSON script below, define a consistent visual style. "
@@ -47,7 +49,8 @@ class ArtDirector(BaseAgent):
             "    'positive_keywords': str,\n"
             "    'negative_keywords': str\n"
             "  }\n"
-            "}"
+            "}\n"
+            f"{language_instruction}"
         )
 
         messages = [

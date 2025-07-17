@@ -58,6 +58,8 @@ class Scriptwriter(BaseAgent):
     """Generate a story script using LLM."""
 
     async def run(self, user_prompt: str) -> ScriptwriterOutput:  # type: ignore[override]
+        language_instruction = self.get_language_instruction()
+        
         system_prompt = (
             "You are a professional animation script writer. "
             "Given a short idea, expand it into a concise JSON script. "
@@ -69,7 +71,8 @@ class Scriptwriter(BaseAgent):
             "    { \"id\": int, \"description\": str }\n"
             "  ]\n"
             "}\n"
-            "Limit the script to 5 scenes maximum."
+            "Limit the script to 5 scenes maximum.\n"
+            f"{language_instruction}"
         )
 
         messages = [

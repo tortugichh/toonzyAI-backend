@@ -1,8 +1,3 @@
-"""
-Клиент для работы с Google Vertex AI Veo 2.0
-Обновлено для использования GA версии модели с long-running operations
-"""
-
 import os
 import base64
 import time
@@ -24,7 +19,6 @@ LOCATION = os.getenv("VERTEX_AI_LOCATION") or os.getenv("VERTEX_LOCATION", "us-c
 GCS_BUCKET = os.getenv("GCS_BUCKET")
 RUNWAY_API_KEY = os.getenv("RUNWAY_API_KEY")
 
-# Popular regions where Vertex AI models are usually available
 VERTEX_AI_REGIONS = [
     "us-central1",   # Iowa (required for Veo according to docs)
     "us-east1",      # Virginia 

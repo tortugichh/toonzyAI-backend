@@ -25,8 +25,8 @@ import time
 logger = logging.getLogger(__name__)
 
 VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
-VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-east1")
-IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "projects/{project}/locations/{location}/publishers/google/models/imagen-4.0-generate-preview-06-06")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")  # Changed from us-east1 to us-central1
+IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "projects/{project}/locations/{location}/publishers/google/models/imagen-3.0-generate-001")  # Changed to imagen-3.0
 GCS_BUCKET = os.getenv("GCS_BUCKET")
 RUNWAY_API_KEY = os.getenv("RUNWAY_API_KEY")
 
@@ -44,6 +44,8 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
     Генерирует изображение через Vertex AI Imagen API.
     Возвращает (image_bytes, image_base64).
     """
+    logger.info(f"🎨 Starting image generation with prompt: {prompt[:100]}...")
+    
     try:
         # Detect non-English text (simple heuristic: presence of Cyrillic chars)
         original_prompt = prompt
@@ -51,29 +53,64 @@ def generate_image(prompt: str) -> Tuple[bytes, str]:
             try:
                 translator = translate.Client()
                 prompt = translator.translate(prompt, target_language="en")["translatedText"]
-                logger.info(f"Prompt translated to English for Imagen: '{original_prompt}' -> '{prompt}'")
+                logger.info(f"🌐 Prompt translated to English for Imagen: '{original_prompt[:50]}...' -> '{prompt[:50]}...'")
             except Exception as te:
-                logger.warning(f"Failed to translate prompt '{original_prompt}': {te}. Using original text.")
+                logger.warning(f"⚠️ Failed to translate prompt '{original_prompt[:50]}...': {te}. Using original text.")
 
+        logger.info(f"🔧 Initializing Vertex AI - Project: {VERTEX_PROJECT}, Location: {VERTEX_LOCATION}")
         aiplatform.init(project=VERTEX_PROJECT, location=VERTEX_LOCATION)
         endpoint = _get_model_path()
+        logger.info(f"🎯 Using endpoint: {endpoint}")
+        
         prediction_client = PredictionServiceClient()
         instance = {"prompt": prompt}
         parameters = {"sampleCount": 1}
+        
+        logger.info("📡 Sending request to Vertex AI Imagen...")
         response = prediction_client.predict(
             endpoint=endpoint,
             instances=[instance],
             parameters=parameters
         )
+        
         if not response.predictions:
-            logger.error("No predictions returned from Vertex Imagen.")
-            return _create_placeholder_image()
-        image_b64 = response.predictions[0]["bytesBase64Encoded"]
+            logger.error("❌ No predictions returned from Vertex Imagen.")
+            raise Exception("No predictions returned from Vertex AI Imagen")
+            
+        if len(response.predictions) == 0:
+            logger.error("❌ Empty predictions array from Vertex Imagen.")
+            raise Exception("Empty predictions array from Vertex AI Imagen")
+            
+        prediction = response.predictions[0]
+        logger.info(f"✅ Received prediction with keys: {list(prediction.keys())}")
+        
+        if "bytesBase64Encoded" not in prediction:
+            logger.error(f"❌ No bytesBase64Encoded in prediction. Available keys: {list(prediction.keys())}")
+            raise Exception("No bytesBase64Encoded field in Vertex AI response")
+            
+        image_b64 = prediction["bytesBase64Encoded"]
+        logger.info(f"📸 Received base64 image data, length: {len(image_b64)} characters")
+        
+        # Validate base64 string
+        if not image_b64 or len(image_b64) < 100:
+            logger.error(f"❌ Invalid base64 image data: length={len(image_b64)}")
+            raise Exception("Invalid base64 image data from Vertex AI")
+            
         image_bytes = base64.b64decode(image_b64)
+        logger.info(f"✅ Successfully decoded image: {len(image_bytes)} bytes")
+        
+        # Validate image bytes
+        if len(image_bytes) < 1000:  # PNG header is at least a few hundred bytes
+            logger.error(f"❌ Suspiciously small image: {len(image_bytes)} bytes")
+            raise Exception("Generated image is too small - likely corrupted")
+            
+        logger.info("🎉 Image generation completed successfully!")
         return image_bytes, image_b64
+        
     except Exception as e:
-        logger.error(f"Vertex Imagen generation failed: {e}")
-        return _create_placeholder_image()
+        logger.error(f"❌ Vertex Imagen generation failed: {e}", exc_info=True)
+        # Re-raise the exception instead of returning placeholder
+        raise Exception(f"Image generation failed: {str(e)}")
 
 def _create_placeholder_image() -> Tuple[bytes, str]:
     """Создает placeholder изображение в случае ошибки."""

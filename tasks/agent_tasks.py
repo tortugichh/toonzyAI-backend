@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import Any, Dict
 
 from celery import shared_task
@@ -17,8 +18,16 @@ from agents.director import Director
 from agents.art_director import ArtDirector
 from agents.character import CharacterAgent
 from agents.environment import EnvironmentAgent
+from agents.illustration import IllustrationAgent
 
 logger = logging.getLogger(__name__)
+
+
+def detect_language(text: str) -> str:
+    """Определяет язык текста на основе присутствия кириллицы."""
+    if re.search(r"[\u0400-\u04FF]", text):
+        return "russian"
+    return "english"
 
 
 @celery_app.task(name="tasks.agent_tasks.generate_story", bind=True, max_retries=2)
@@ -31,6 +40,25 @@ def generate_story(self, story_data: dict) -> Dict[str, Any]:
         Dict with keys: script, style, characters, environments.
     """
     try:
+        # Определяем язык на основе содержимого формы
+        all_text = ""
+        for field in ["prompt", "genre", "style", "theme", "book_style", "wishes"]:
+            if story_data.get(field):
+                all_text += " " + str(story_data[field])
+        
+        # Добавляем текст персонажей
+        if story_data.get("characters"):
+            for char in story_data["characters"]:
+                if char.get("name"):
+                    all_text += " " + char["name"]
+                if char.get("description"):
+                    all_text += " " + char["description"]
+                if char.get("role"):
+                    all_text += " " + char["role"]
+        
+        language = detect_language(all_text)
+        logger.info(f"🌐 Detected language: {language} from text: {all_text[:100]}...")
+
         # Собираем строку prompt из структурированных полей
         prompt_parts = []
         if story_data.get("prompt"):
@@ -66,7 +94,7 @@ def generate_story(self, story_data: dict) -> Dict[str, Any]:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
-        result = loop.run_until_complete(_run_agents_async(user_prompt))
+        result = loop.run_until_complete(_run_agents_async(user_prompt, language))
         logger.info("✅ [MAS] Story generation finished")
         return result
 
@@ -75,25 +103,41 @@ def generate_story(self, story_data: dict) -> Dict[str, Any]:
         raise self.retry(exc=exc, countdown=60)
 
 
-async def _run_agents_async(user_prompt: str) -> Dict[str, Any]:  # noqa: D401
+async def _run_agents_async(user_prompt: str, language: str) -> Dict[str, Any]:  # noqa: D401
     """Async helper that runs agents sequentially."""
-    director = Director()
+    director = Director(language=language)
     director_out = await director.run(user_prompt)
 
     script_dict = director_out.script
 
-    art_dir = ArtDirector()
+    art_dir = ArtDirector(language=language)
     art_out = await art_dir.run(script_dict)
 
-    char_agent = CharacterAgent()
+    char_agent = CharacterAgent(language=language)
     char_out = await char_agent.run(script_dict)
 
-    env_agent = EnvironmentAgent()
+    env_agent = EnvironmentAgent(language=language)
     env_out = await env_agent.run(script_dict)
+
+    # Generate illustrations using the script and style information
+    try:
+        logger.info("🎨 [MAS] Starting illustration generation...")
+        illustration_agent = IllustrationAgent(language=language)
+        illustration_out = await illustration_agent.run({
+            "script": script_dict,
+            "style": art_out.style.model_dump(),
+            "characters": char_out.characters,
+            "environments": env_out.environments
+        })
+        logger.info("✅ [MAS] Illustration generation completed")
+    except Exception as e:
+        logger.warning("⚠️ [MAS] Illustration generation failed: %s", e)
+        illustration_out = {"illustrations": []}
 
     return {
         "script": script_dict,
-        "style": art_out.model_dump(),
+        "style": art_out.style.model_dump(),
         "characters": char_out.model_dump(),
         "environments": env_out.model_dump(),
+        "illustrations": illustration_out
     } 
