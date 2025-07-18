@@ -30,6 +30,20 @@ def detect_language(text: str) -> str:
     return "english"
 
 
+def _ensure_json_serializable(obj):
+    """Recursively convert objects to JSON serializable format."""
+    if hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+    elif isinstance(obj, dict):
+        return {k: _ensure_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_ensure_json_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        return obj.__dict__
+    else:
+        return str(obj)
+
+
 @celery_app.task(name="tasks.agent_tasks.generate_story", bind=True, max_retries=2)
 def generate_story(self, story_data: dict) -> Dict[str, Any]:
     """Celery task entrypoint – orchestrates the full MAS up to prompt parts.
@@ -96,6 +110,17 @@ def generate_story(self, story_data: dict) -> Dict[str, Any]:
 
         result = loop.run_until_complete(_run_agents_async(user_prompt, language))
         logger.info("✅ [MAS] Story generation finished")
+        
+        # Ensure all values in result are JSON serializable
+        import json
+        try:
+            json.dumps(result)
+            logger.info("✅ [MAS] Result is JSON serializable")
+        except (TypeError, ValueError) as e:
+            logger.error("❌ [MAS] Result is not JSON serializable: %s", e)
+            # Convert any remaining non-serializable objects
+            result = _ensure_json_serializable(result)
+        
         return result
 
     except Exception as exc:
@@ -132,12 +157,14 @@ async def _run_agents_async(user_prompt: str, language: str) -> Dict[str, Any]: 
         logger.info("✅ [MAS] Illustration generation completed")
     except Exception as e:
         logger.warning("⚠️ [MAS] Illustration generation failed: %s", e)
-        illustration_out = {"illustrations": []}
+        # Create a proper IllustrationAgentOutput object for consistency
+        from agents.illustration import IllustrationAgentOutput
+        illustration_out = IllustrationAgentOutput(illustrations=[])
 
     return {
         "script": script_dict,
         "style": art_out.style.model_dump(),
         "characters": char_out.model_dump(),
         "environments": env_out.model_dump(),
-        "illustrations": illustration_out
+        "illustrations": illustration_out.model_dump()
     } 
