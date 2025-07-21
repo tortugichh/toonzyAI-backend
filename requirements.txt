@@ -36,6 +36,9 @@ Pillow
 httpx
 requests
 
+# Email functionality
+fastapi-mail
+
 # Development and testing
 pytest
 pytest-asyncio

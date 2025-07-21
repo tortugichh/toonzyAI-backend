@@ -2,19 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from typing import Dict, Any
+from datetime import datetime, timedelta, timezone
 import logging
 
 from db.avatar_repository import get_db, User
 from schemas.auth_schemas import (
     UserCreate, UserResponse, LoginRequest, Token, 
-    RefreshTokenRequest, UserUpdate, PasswordChangeRequest
+    RefreshTokenRequest, UserUpdate, PasswordChangeRequest,
+    EmailVerificationRequest, PasswordResetRequest, PasswordResetConfirmRequest
 )
 from utils.auth import (
     get_password_hash, authenticate_user, create_tokens,
     get_current_active_user, verify_token, get_user_by_id,
     get_user_by_username, get_user_by_email, verify_password
 )
+from utils.email_service import send_verification_email, generate_verification_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,6 +49,9 @@ async def register_user(
         )
     
     try:
+        # Generate verification token
+        verification_token = generate_verification_token()
+        
         # Create new user
         hashed_password = get_password_hash(user_data.password)
         db_user = User(
@@ -52,12 +59,24 @@ async def register_user(
             email=user_data.email,
             hashed_password=hashed_password,
             is_active=True,
-            is_verified=False
+            is_verified=False,
+            verification_token=verification_token,
+            verification_token_expires=datetime.now(timezone.utc) + timedelta(hours=24)
         )
         
         db.add(db_user)
         await db.commit()
         await db.refresh(db_user)
+        
+        # Send verification email
+        email_sent = await send_verification_email(
+            user_data.email, 
+            user_data.username, 
+            verification_token
+        )
+        
+        if not email_sent:
+            logger.warning(f"Failed to send verification email to {user_data.email}")
         
         logger.info(f"User registered successfully: {user_data.username}")
         return UserResponse.model_validate(db_user)
@@ -126,6 +145,12 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled"
+        )
+    
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in"
         )
     
     tokens = create_tokens(user)
@@ -270,4 +295,86 @@ async def verify_user_token(
     return {
         "valid": True,
         "user": UserResponse.model_validate(current_user).model_dump()
-    } 
+    }
+
+
+@router.post("/verify-email", response_model=Dict[str, Any])
+async def verify_email(
+    verification_data: EmailVerificationRequest,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Verify user email with token."""
+    logger.info(f"Email verification attempt with token: {verification_data.token[:10]}...")
+    
+    # Find user by verification token
+    result = await db.execute(
+        select(User).where(
+            User.verification_token == verification_data.token,
+            User.verification_token_expires > datetime.now(timezone.utc)
+        )
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
+    
+    # Mark user as verified
+    user.is_verified = True
+    user.verification_token = None
+    user.verification_token_expires = None
+    
+    await db.commit()
+    await db.refresh(user)
+    
+    logger.info(f"Email verified successfully for user: {user.username}")
+    return {
+        "message": "Email verified successfully",
+        "user": UserResponse.model_validate(user).model_dump()
+    }
+
+
+@router.post("/resend-verification", response_model=Dict[str, Any])
+async def resend_verification_email(
+    email_data: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Resend verification email to user."""
+    logger.info(f"Resend verification attempt for email: {email_data.email}")
+    
+    user = await get_user_by_email(db, email_data.email)
+    if not user:
+        # Don't reveal if email exists or not
+        return {"message": "If the email exists, a verification link has been sent"}
+    
+    if user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+    
+    # Generate new verification token
+    verification_token = generate_verification_token()
+    user.verification_token = verification_token
+    user.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    
+    await db.commit()
+    
+    # Send verification email
+    email_sent = await send_verification_email(
+        user.email, 
+        user.username, 
+        verification_token
+    )
+    
+    if not email_sent:
+        logger.warning(f"Failed to send verification email to {user.email}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email"
+        )
+    
+    logger.info(f"Verification email resent to: {user.email}")
+    return {"message": "Verification email sent successfully"} 
