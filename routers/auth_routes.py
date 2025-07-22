@@ -7,7 +7,7 @@ from typing import Dict, Any
 from datetime import datetime, timedelta, timezone
 import logging
 
-from db.avatar_repository import get_db, User
+from db.avatar_repository import get_db, User, PendingRegistration
 from schemas.auth_schemas import (
     UserCreate, UserResponse, LoginRequest, Token, 
     RefreshTokenRequest, UserUpdate, PasswordChangeRequest,
@@ -24,69 +24,68 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=Dict[str, str], status_code=status.HTTP_201_CREATED)
 async def register_user(
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db)
-) -> UserResponse:
-    """Register a new user."""
+) -> Dict[str, str]:
+    """Register a new user (pending verification)."""
     logger.info(f"Registration attempt for username: {user_data.username}")
     
-    # Check if username already exists
+    # Check if username or email already exists in users or pending_registrations
     existing_user = await get_user_by_username(db, user_data.username)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered"
         )
-    
-    # Check if email already exists
     existing_email = await get_user_by_email(db, user_data.email)
     if existing_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    
+    result = await db.execute(select(PendingRegistration).where(PendingRegistration.username == user_data.username))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already pending verification"
+        )
+    result = await db.execute(select(PendingRegistration).where(PendingRegistration.email == user_data.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already pending verification"
+        )
     try:
-        # Generate verification token
         verification_token = generate_verification_token()
-        
-        # Create new user
         hashed_password = get_password_hash(user_data.password)
-        db_user = User(
+        expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        pending = PendingRegistration(
             username=user_data.username,
             email=user_data.email,
             hashed_password=hashed_password,
-            is_active=True,
-            is_verified=False,
             verification_token=verification_token,
-            verification_token_expires=datetime.now(timezone.utc) + timedelta(hours=24)
+            verification_token_expires=expires
         )
-        
-        db.add(db_user)
+        db.add(pending)
         await db.commit()
-        await db.refresh(db_user)
-        
         # Send verification email
         email_sent = await send_verification_email(
-            user_data.email, 
-            user_data.username, 
+            user_data.email,
+            user_data.username,
             verification_token
         )
-        
         if not email_sent:
+            await db.delete(pending)
+            await db.commit()
             logger.warning(f"Failed to send verification email to {user_data.email}")
-        
-        logger.info(f"User registered successfully: {user_data.username}")
-        return UserResponse.model_validate(db_user)
-        
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username or email already exists"
-        )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification email. Registration cancelled."
+            )
+        logger.info(f"Pending registration created for: {user_data.username}")
+        return {"message": "Verification email sent. Please check your inbox."}
     except Exception as e:
         await db.rollback()
         logger.error(f"Registration error: {e}")
@@ -303,35 +302,48 @@ async def verify_email(
     verification_data: EmailVerificationRequest,
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Verify user email with token."""
+    """Verify user email with token and create user."""
     logger.info(f"Email verification attempt with token: {verification_data.token[:10]}...")
-    
-    # Find user by verification token
+    # Find pending registration by token
     result = await db.execute(
-        select(User).where(
-            User.verification_token == verification_data.token,
-            User.verification_token_expires > datetime.now(timezone.utc)
+        select(PendingRegistration).where(
+            PendingRegistration.verification_token == verification_data.token,
+            PendingRegistration.verification_token_expires > datetime.now(timezone.utc)
         )
     )
-    user = result.scalar_one_or_none()
-    
-    if not user:
+    pending = result.scalar_one_or_none()
+    if not pending:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token"
         )
-    
-    # Mark user as verified
-    user.is_verified = True
-    user.verification_token = None
-    user.verification_token_expires = None
-    
+    # Check if user already exists (should not, but for safety)
+    existing_user = await get_user_by_username(db, pending.username)
+    existing_email = await get_user_by_email(db, pending.email)
+    if existing_user or existing_email:
+        await db.delete(pending)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already exists"
+        )
+    # Create user
+    user = User(
+        username=pending.username,
+        email=pending.email,
+        hashed_password=pending.hashed_password,
+        is_active=True,
+        is_verified=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
+    )
+    db.add(user)
+    await db.delete(pending)
     await db.commit()
     await db.refresh(user)
-    
-    logger.info(f"Email verified successfully for user: {user.username}")
+    logger.info(f"Email verified and user created: {user.username}")
     return {
-        "message": "Email verified successfully",
+        "message": "Email verified and account created successfully",
         "user": UserResponse.model_validate(user).model_dump()
     }
 

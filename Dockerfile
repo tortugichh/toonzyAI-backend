@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     ffmpeg \
     procps \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip

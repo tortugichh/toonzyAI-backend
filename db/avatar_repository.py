@@ -149,6 +149,16 @@ class AnimationSegment(Base):
     # Relationships
     project = relationship("AnimationProject", back_populates="segments")
 
+class PendingRegistration(Base):
+    __tablename__ = "pending_registrations"
+    id = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    username = mapped_column(String(50), unique=True, nullable=False, index=True)
+    email = mapped_column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = mapped_column(String(255), nullable=False)
+    verification_token = mapped_column(String(255), nullable=False, unique=True, index=True)
+    verification_token_expires = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 async def insert_avatar(avatar_id: UUID, user_id: UUID, prompt: str, image_data: bytes, status: str, moderation_flags: Optional[List[str]] = None) -> UUID:
     """Вставляет новый аватар в базу данных."""
     try:
