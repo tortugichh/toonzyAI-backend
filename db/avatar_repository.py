@@ -55,6 +55,7 @@ class User(Base):
     hashed_password = mapped_column(String(255), nullable=False)
     is_active = mapped_column(Boolean, default=True, nullable=False)
     is_verified = mapped_column(Boolean, default=False, nullable=False)
+    is_admin = mapped_column(Boolean, default=False, nullable=False)
     verification_token = mapped_column(String(255), nullable=True)
     verification_token_expires = mapped_column(DateTime(timezone=True), nullable=True)
     password_reset_token = mapped_column(String(255), nullable=True)

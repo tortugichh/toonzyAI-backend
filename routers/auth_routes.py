@@ -100,15 +100,15 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db)
 ) -> Token:
-    """OAuth2 compatible token login (for Swagger UI)."""
-    logger.info(f"OAuth2 login attempt for username: {form_data.username}")
+    """OAuth2 compatible token login (for Swagger UI). Accepts username or email."""
+    logger.info(f"OAuth2 login attempt for login: {form_data.username}")
     
     user = await authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        logger.warning(f"Failed OAuth2 login attempt for username: {form_data.username}")
+        logger.warning(f"Failed OAuth2 login attempt for login: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -128,15 +128,15 @@ async def login(
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db)
 ) -> Token:
-    """Login user and return JWT tokens."""
-    logger.info(f"Login attempt for username: {login_data.username}")
+    """Login user and return JWT tokens. Accepts username or email."""
+    logger.info(f"Login attempt for login: {login_data.login}")
     
-    user = await authenticate_user(db, login_data.username, login_data.password)
+    user = await authenticate_user(db, login_data.login, login_data.password)
     if not user:
-        logger.warning(f"Failed login attempt for username: {login_data.username}")
+        logger.warning(f"Failed login attempt for login: {login_data.login}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -342,9 +342,15 @@ async def verify_email(
     await db.commit()
     await db.refresh(user)
     logger.info(f"Email verified and user created: {user.username}")
+    # Generate tokens for auto-login
+    tokens = create_tokens(user)
     return {
         "message": "Email verified and account created successfully",
-        "user": UserResponse.model_validate(user).model_dump()
+        "user": UserResponse.model_validate(user).model_dump(),
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "token_type": tokens["token_type"],
+        "expires_in": tokens["expires_in"],
     }
 
 
