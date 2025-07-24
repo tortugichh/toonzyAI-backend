@@ -18,7 +18,7 @@ from utils.auth import (
     get_current_active_user, verify_token, get_user_by_id,
     get_user_by_username, get_user_by_email, verify_password
 )
-from utils.email_service import send_verification_email, generate_verification_token
+from utils.email_service import send_verification_email, generate_verification_token, send_password_reset_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -359,40 +359,166 @@ async def resend_verification_email(
     email_data: PasswordResetRequest,
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Resend verification email to user."""
+    """Resend verification email to user or pending registration."""
     logger.info(f"Resend verification attempt for email: {email_data.email}")
+
+    # 1. Check if user exists and is not verified
+    user = await get_user_by_email(db, email_data.email)
+    if user:
+        if user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already verified"
+            )
+        # Generate new verification token for existing user
+        verification_token = generate_verification_token()
+        user.verification_token = verification_token
+        user.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        await db.commit()
+        email_sent = await send_verification_email(
+            user.email,
+            user.username,
+            verification_token
+        )
+        if not email_sent:
+            logger.warning(f"Failed to send verification email to {user.email}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification email"
+            )
+        logger.info(f"Verification email resent to: {user.email}")
+        return {"message": "Verification email sent successfully"}
+
+    # 2. Check if pending registration exists
+    result = await db.execute(select(PendingRegistration).where(PendingRegistration.email == email_data.email))
+    pending = result.scalar_one_or_none()
+    if pending:
+        # Generate new verification token for pending registration
+        verification_token = generate_verification_token()
+        pending.verification_token = verification_token
+        pending.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        await db.commit()
+        email_sent = await send_verification_email(
+            pending.email,
+            pending.username,
+            verification_token
+        )
+        if not email_sent:
+            logger.warning(f"Failed to send verification email to {pending.email}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification email"
+            )
+        logger.info(f"Verification email resent to pending registration: {pending.email}")
+        return {"message": "Verification email sent successfully"}
+
+    # 3. Don't reveal if email exists or not
+    return {"message": "If the email exists, a verification link has been sent"}
+
+
+@router.post("/forgot-password", response_model=Dict[str, str])
+async def forgot_password(
+    email_data: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, str]:
+    """Send password reset email to user."""
+    logger.info(f"Password reset requested for email: {email_data.email}")
     
+    # Find user by email
     user = await get_user_by_email(db, email_data.email)
     if not user:
-        # Don't reveal if email exists or not
-        return {"message": "If the email exists, a verification link has been sent"}
+        # Don't reveal if email exists or not for security
+        logger.info(f"Password reset requested for non-existent email: {email_data.email}")
+        return {"message": "If the email exists, a password reset link has been sent."}
     
-    if user.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is already verified"
+    if not user.is_active:
+        logger.warning(f"Password reset requested for inactive user: {email_data.email}")
+        return {"message": "If the email exists, a password reset link has been sent."}
+    
+    try:
+        # Generate reset token
+        reset_token = generate_verification_token()
+        reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)  # 1 hour expiry
+        
+        # Update user with reset token
+        user.password_reset_token = reset_token
+        user.password_reset_token_expires = reset_token_expires
+        await db.commit()
+        
+        # Send reset email
+        email_sent = await send_password_reset_email(
+            user.email,
+            user.username,
+            reset_token
         )
-    
-    # Generate new verification token
-    verification_token = generate_verification_token()
-    user.verification_token = verification_token
-    user.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
-    
-    await db.commit()
-    
-    # Send verification email
-    email_sent = await send_verification_email(
-        user.email, 
-        user.username, 
-        verification_token
-    )
-    
-    if not email_sent:
-        logger.warning(f"Failed to send verification email to {user.email}")
+        
+        if not email_sent:
+            # Clear the token if email failed
+            user.password_reset_token = None
+            user.password_reset_token_expires = None
+            await db.commit()
+            logger.error(f"Failed to send password reset email to {email_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send password reset email"
+            )
+        
+        logger.info(f"Password reset email sent to {email_data.email}")
+        return {"message": "If the email exists, a password reset link has been sent."}
+        
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Password reset error for {email_data.email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification email"
+            detail="Internal server error during password reset"
+        )
+
+
+@router.post("/reset-password", response_model=Dict[str, str])
+async def reset_password(
+    reset_data: PasswordResetConfirmRequest,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, str]:
+    """Reset password using token."""
+    logger.info("Password reset confirmation requested")
+    
+    if not reset_data.token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token is required"
         )
     
-    logger.info(f"Verification email resent to: {user.email}")
-    return {"message": "Verification email sent successfully"} 
+    # Find user by reset token
+    result = await db.execute(
+        select(User).where(
+            User.password_reset_token == reset_data.token,
+            User.password_reset_token_expires > datetime.now(timezone.utc)
+        )
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    try:
+        # Update password
+        user.hashed_password = get_password_hash(reset_data.new_password)
+        user.password_reset_token = None
+        user.password_reset_token_expires = None
+        user.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        
+        logger.info(f"Password reset successful for user: {user.username}")
+        return {"message": "Password reset successful. You can now login with your new password."}
+        
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Password reset confirmation error for user {user.username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during password reset"
+        ) 

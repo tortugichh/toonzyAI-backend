@@ -37,19 +37,6 @@ async def create_avatar(
     if total >= 1:
         raise HTTPException(status_code=403, detail="Доступна только одна генерация аватара для нового пользователя.")
 
-    # Удаляем проверку промпта на безопасность
-    # moderation_result = check_prompt_safety(request.prompt)
-    # if not moderation_result.is_safe:
-    #     logger.warning(f"Unsafe prompt detected from user {current_user.username}: {moderation_result.reasons}")
-    #     raise HTTPException(
-    #         status_code=400, 
-    #         detail={
-    #             "error": "content_policy_violation",
-    #             "message": "Ваш промпт нарушает политику контента",
-    #             "reasons": moderation_result.reasons,
-    #             "suggested_fix": moderation_result.suggested_fix
-    #         }
-    #     )
     try:
         result = await generate_avatar(request, current_user.id)
         logger.info(f"Avatar created successfully for user {current_user.username}: {result.avatar_id}")
