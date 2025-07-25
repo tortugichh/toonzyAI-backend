@@ -99,12 +99,12 @@ async def create_animation_project(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Video generation is temporarily disabled for maintenance. Please try later.")
     try:
-        # Лимит: только 1 анимационный проект на пользователя
-        count_query = select(func.count(AnimationProject.id)).where(AnimationProject.user_id == current_user.id)
-        total_result = await db.execute(count_query)
-        total = total_result.scalar() or 0
-        if total >= 1:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступен только один анимационный проект для нового пользователя.")
+        # Лимит: только 1 видео генерация на пользователя
+        if current_user.video_generation_count >= 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail="Доступна только одна генерация видео для нового пользователя. Аватары и истории можно создавать без ограничений."
+            )
 
         # 1. Проверяем, что аватар принадлежит текущему пользователю
         avatar_query = select(Avatar).where(
@@ -139,10 +139,14 @@ async def create_animation_project(
         )
         
         db.add(animation_project)
+        
+        # 4. Увеличиваем счетчик видео генераций пользователя
+        current_user.video_generation_count += 1
+        
         await db.commit()
         await db.refresh(animation_project)
         
-        # 4. Запускаем фоновую задачу создания сегментов
+        # 5. Запускаем фоновую задачу создания сегментов
         from tasks.generation_tasks import create_animation_segments_task
         create_animation_segments_task.delay(str(animation_project.id))
         

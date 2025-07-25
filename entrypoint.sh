@@ -8,9 +8,9 @@ until nc -z db 5432; do
 done
 
 # Run migrations from scratch (idempotent): если таблицы уже существуют – Alembic пропустит шаги.
- echo "[entrypoint] Running alembic upgrade head"
+ echo "[entrypoint] Running alembic upgrade heads"
  almbk_err=0
- if alembic upgrade head; then
+ if alembic upgrade heads; then
    echo "[entrypoint] Migrations up-to-date"
  else
    almbk_err=$?

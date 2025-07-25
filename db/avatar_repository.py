@@ -60,6 +60,7 @@ class User(Base):
     verification_token_expires = mapped_column(DateTime(timezone=True), nullable=True)
     password_reset_token = mapped_column(String(255), nullable=True)
     password_reset_token_expires = mapped_column(DateTime(timezone=True), nullable=True)
+    video_generation_count = mapped_column(Integer, default=0, nullable=False)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

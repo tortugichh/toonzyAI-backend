@@ -80,7 +80,7 @@ async def register_user(
             await db.delete(pending)
             await db.commit()
             logger.warning(f"Failed to send verification email to {user_data.email}")
-            raise HTTPException(
+        raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send verification email. Registration cancelled."
             )
@@ -294,7 +294,7 @@ async def verify_user_token(
     return {
         "valid": True,
         "user": UserResponse.model_validate(current_user).model_dump()
-    }
+    } 
 
 
 @router.post("/verify-email", response_model=Dict[str, Any])
