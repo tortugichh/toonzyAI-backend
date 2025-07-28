@@ -79,6 +79,8 @@ async def send_verification_email(email: EmailStr, username: str, token: str) ->
         
     except Exception as e:
         logger.error(f"Failed to send verification email to {email}: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception details: {str(e)}")
         return False
 
 async def send_password_reset_email(email: EmailStr, username: str, token: str) -> bool:

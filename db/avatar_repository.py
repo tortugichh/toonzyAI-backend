@@ -1,5 +1,10 @@
 from sqlalchemy import create_engine, Column, String, LargeBinary, DateTime, Text, func, Boolean, Integer, ForeignKey, Enum, JSON
-from sqlalchemy.orm import sessionmaker, declarative_base, mapped_column, relationship
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+try:
+    from sqlalchemy.orm import mapped_column
+except ImportError:
+    # Fallback for older SQLAlchemy versions
+    from sqlalchemy import Column as mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.sql import select, update
 from uuid import uuid4, UUID
@@ -7,7 +12,12 @@ from typing import Optional, List
 import os
 import enum
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+try:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+except ImportError:
+    # Fallback for older SQLAlchemy versions
+    from sqlalchemy.orm import sessionmaker as async_sessionmaker
 from fastapi import Depends
 
 load_dotenv()
