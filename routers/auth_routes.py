@@ -71,18 +71,16 @@ async def register_user(
         db.add(pending)
         await db.commit()
         # Send verification email
-        logger.info(f"Attempting to send verification email to {user_data.email}")
         email_sent = await send_verification_email(
             user_data.email,
             user_data.username,
             verification_token
         )
-        logger.info(f"Email send result: {email_sent}")
         if not email_sent:
             await db.delete(pending)
             await db.commit()
             logger.warning(f"Failed to send verification email to {user_data.email}")
-            raise HTTPException(
+        raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send verification email. Registration cancelled."
             )

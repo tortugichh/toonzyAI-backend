@@ -183,3 +183,39 @@ async def list_user_stories(
     except Exception as e:
         logger.exception("Error getting stories for user %s: %s", current_user.id, e)
         raise HTTPException(status_code=500, detail="Internal server error") 
+
+
+@router.delete("/stories/{story_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_story(
+    story_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a story created by the current user."""
+    try:
+        # Check if user owns this story
+        story_query = select(Story).where(
+            Story.id == story_id,
+            Story.user_id == current_user.id
+        )
+        story_result = await db.execute(story_query)
+        story = story_result.scalar_one_or_none()
+        
+        if not story:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Story not found or doesn't belong to current user"
+            )
+        
+        # Delete the story
+        await db.delete(story)
+        await db.commit()
+        
+        logger.info(f"Story {story_id} deleted by user {current_user.username}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.exception("Error deleting story %s: %s", story_id, e)
+        raise HTTPException(status_code=500, detail="Internal server error") 
